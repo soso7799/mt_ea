@@ -301,15 +301,22 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    if(id == CHARTEVENT_OBJECT_CLICK && sparam == BTN_NAME)
    {
       ObjectSetInteger(0, BTN_NAME, OBJPROP_STATE, false); // 按鈕彈回，不要保持按下狀態
-      if(WriteAllSymbolsCsv())
+      bool okLocal  = WriteAllSymbolsCsvTo(false);
+      bool okCommon = WriteAllSymbolsCsvTo(true);
+      if(okLocal || okCommon)
       {
-         LastCsvUpdateTime = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
+         // 兩個資料夾都寫一份，只要其中一個成功就算完成；Experts記錄檔會分別
+         // 顯示兩邊各自成功/失敗，方便對照Excel巨集實際連的是哪一個路徑。
+         string where = (okLocal && okCommon) ? "終端機私有資料夾+共用資料夾"
+                        : okLocal ? "僅終端機私有資料夾(共用資料夾失敗)"
+                                  : "僅共用資料夾(終端機私有資料夾失敗)";
+         LastCsvUpdateTime = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + " ["+where+"]";
          Print("手動更新CSV完成：", LastCsvUpdateTime);
       }
       else
       {
          // 之前這裡不管寫檔成功或失敗都照樣顯示「完成」，導致CSV其實沒更新
-         // 卻誤以為已經更新。現在寫檔失敗會如實顯示錯誤代碼(常見原因：
+         // 卻誤以為已經更新。現在兩個資料夾都失敗才會顯示錯誤(常見原因：
          // Excel還開著那個CSV檔案，把它鎖住了，MT5沒辦法覆寫)。
          LastCsvUpdateTime = "更新失敗(錯誤:"+IntegerToString(GetLastError())+")";
          Print("手動更新CSV失敗！錯誤代碼：", GetLastError(), "（常見原因：Excel還開著Excel_Monitor.csv，請先關閉該檔案再試一次）");
@@ -383,14 +390,26 @@ void OnTimer()
 //====================================================================
 // A. CSV 輸出(8大商品)
 //====================================================================
-bool WriteAllSymbolsCsv()
+// 這支indicator讀TAIParams.csv/VegasFilterParams.csv/VegasDualPathParams.csv時都是
+// 從FILE_COMMON(共用資料夾)讀的，但先前寫Excel_Monitor.csv卻只寫終端機自己的私有
+// 資料夾(MQL5\Files)，兩邊路徑不一致。如果Excel巨集是連到共用資料夾(多帳號/多台
+// 終端機共用同一份Excel檔時的常見作法)，MT5這裡其實每次都寫成功，只是Excel根本
+// 沒看那個資料夾，才會一直「按了沒反應」。改成兩個資料夾都寫一份，不管Excel巨集
+// 連的是哪一個路徑都吃得到最新資料：
+//   終端機私有資料夾： (雙擊「檔案」→「開啟資料夾」)\MQL5\Files\Excel_Monitor.csv
+//   共用資料夾：       %APPDATA%\MetaQuotes\Terminal\Common\Files\Excel_Monitor.csv
+bool WriteAllSymbolsCsvTo(bool useCommon)
 {
    // 加上FILE_SHARE_READ|FILE_SHARE_WRITE：如果Excel那邊用共用模式打開這個檔案在看，
    // MT5這裡還是能覆寫，不會因為檔案被Excel佔用就整個失敗。
-   int handle = FileOpen(CsvFileName, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE, ",");
+   int flags = FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE;
+   if(useCommon) flags |= FILE_COMMON;
+
+   int handle = FileOpen(CsvFileName, flags, ",");
    if(handle==INVALID_HANDLE)
    {
-      Print("無法開啟檔案寫入: ", CsvFileName, " 錯誤:", GetLastError());
+      Print("無法開啟檔案寫入(", useCommon?"共用資料夾":"終端機私有資料夾", "): ",
+            CsvFileName, " 錯誤:", GetLastError());
       return false;
    }
 
