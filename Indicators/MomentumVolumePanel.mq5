@@ -46,6 +46,9 @@ input group "--- 成交量確認 ---"
 input int                inpVolAvgPeriod   = 20;      // 均量計算期
 input double             inpVolUpThreshold = 1.2;     // 成交量超過均量這個倍數才算「放量確認」
 
+input group "--- 面板顯示 ---"
+input int                inpPanelFontSize  = 14;      // 市場狀態文字面板字體大小(想再調整直接改這個input即可)
+
 // 實際運算用的變數(非input)，OnInit時先用上面Default值初始化，
 // 找得到TAIParams.csv優化結果的話會自動覆蓋成該商品的最佳值
 int MomentumPeriod, MaPeriod, FilterPeriod;
@@ -150,7 +153,7 @@ void CreateLabel(const string name, const int subWindow, const int y)
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 5);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetString(0, name, OBJPROP_FONT, "Microsoft JhengHei");
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 10);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpPanelFontSize);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
@@ -371,7 +374,7 @@ int OnCalculate(const int rates_total, const int prev_calculated,
 
    int panelWindow = GetPanelWindow();
    CreateLabel(PFX2+"T1", panelWindow, 5);
-   CreateLabel(PFX2+"T2", panelWindow, 23);
+   CreateLabel(PFX2+"T2", panelWindow, 5 + inpPanelFontSize + 8); // 間距跟著字體大小走，字體變大不會疊行
    ObjectSetString(0, PFX2+"T1", OBJPROP_TEXT, marketState);
    ObjectSetInteger(0, PFX2+"T1", OBJPROP_COLOR, stateColor);
    ObjectSetString(0, PFX2+"T2", OBJPROP_TEXT, advice);

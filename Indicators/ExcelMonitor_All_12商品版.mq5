@@ -56,7 +56,7 @@ input double TouchTolPoints  = 10;
 input int    TouchLookback   = 20;
 input int    VolumeAvgBars   = 20;
 input int    UpdateSeconds   = 5;      // CSV與圖表都用這個頻率更新
-input int    LabelFontSize   = 11;
+input int    LabelFontSize   = 14;     // 面板文字字體大小(想再調大/調小，直接改這個input即可，不用改程式碼)
 input int    MinGapPixels    = 18;     // 支撐壓力文字防重疊間距(像素)
 input int    VolPanelX       = 10;
 input int    VolPanelY       = 90;     // 避開MT5內建倒數文字
@@ -286,10 +286,10 @@ void CreateUpdateCsvButton()
       ObjectSetInteger(0, BTN_NAME, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, BTN_NAME, OBJPROP_XDISTANCE, VolPanelX);
       ObjectSetInteger(0, BTN_NAME, OBJPROP_YDISTANCE, VolPanelY + (LabelFontSize+8)*4 + 10);
-      ObjectSetInteger(0, BTN_NAME, OBJPROP_XSIZE, 200);
-      ObjectSetInteger(0, BTN_NAME, OBJPROP_YSIZE, 28);
+      ObjectSetInteger(0, BTN_NAME, OBJPROP_XSIZE, 240);
+      ObjectSetInteger(0, BTN_NAME, OBJPROP_YSIZE, 34);
       ObjectSetString(0, BTN_NAME, OBJPROP_TEXT, "手動更新CSV給Excel");
-      ObjectSetInteger(0, BTN_NAME, OBJPROP_FONTSIZE, 9);
+      ObjectSetInteger(0, BTN_NAME, OBJPROP_FONTSIZE, LabelFontSize);
       ObjectSetInteger(0, BTN_NAME, OBJPROP_COLOR, clrWhite);
       ObjectSetInteger(0, BTN_NAME, OBJPROP_BGCOLOR, clrDarkGreen);
       ObjectSetInteger(0, BTN_NAME, OBJPROP_SELECTABLE, false);
@@ -1486,7 +1486,7 @@ void DrawEntryMarker(datetime t, double price, bool isBull, string voteTag)
    if(ObjectFind(0, txtName) < 0)
    {
       ObjectCreate(0, txtName, OBJ_TEXT, 0, t, txtPrice);
-      ObjectSetInteger(0, txtName, OBJPROP_FONTSIZE, 9);
+      ObjectSetInteger(0, txtName, OBJPROP_FONTSIZE, LabelFontSize);
       ObjectSetInteger(0, txtName, OBJPROP_SELECTABLE, false);
       ObjectSetString(0, txtName, OBJPROP_FONT, "Arial Bold");
    }
