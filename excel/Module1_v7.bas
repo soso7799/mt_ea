@@ -2,7 +2,7 @@ Attribute VB_Name = "Module1"
 Option Explicit
 
 '====================================================================
-' 三大策略終極對接系統（v6 - Excel_Monitor.csv 39欄 + MultiTF_Signals.csv 8列）
+' 三大策略終極對接系統（v7 - Excel_Monitor.csv 39欄 + MultiTF_Signals.csv 8列）
 ' Excel_Monitor.csv 欄位對應(0-based，來自 ExcelMonitor_All.mq5 v1.10)：
 '  0 Symbol            1 Bid              2 AsiaLow         3 AsiaHigh
 '  4 EuropeLow         5 EuropeHigh       6 USLow           7 USHigh
@@ -22,6 +22,12 @@ Option Explicit
 '    TodayChangePct 這5欄，parts(31) 實際上已經是 CandlePattern，AB欄長期
 '    寫錯資料。這版一併修正，並把新增的 SessionLevelTest/SessionBreakoutJudge
 '    也接上。
+'
+' 修正紀錄(v7)：
+'  - MultiTF_Signals.csv 是 optimize.py(Python)寫出來的，預設用UTF-8編碼；
+'    但舊版用 Open...For Input 讀檔，VBA會照系統語系(Big5)去解碼，UTF-8的
+'    中文字節被Big5誤判，M15/H1共振狀態那兩欄就變成亂碼(例如「憭征銝?」)。
+'    改用 ADODB.Stream 以UTF-8明確讀取，不管系統語系是什麼都能正確解碼。
 '
 ' MultiTF_Signals.csv 欄位(來自 optimize.py，用MetaTrader5套件直連算出)：
 '  Symbol,M15_Long,M15_Short,M15_Status,H1_Long,H1_Short,H1_Status,UpdateTime
@@ -276,9 +282,10 @@ End Function
 Private Sub ImportMultiTFSignals(ByVal wsReport As Worksheet)
 
     Dim csvPath As String
+    Dim lines() As String
     Dim lineStr As String
-    Dim fileNum As Integer
     Dim parts() As String
+    Dim i As Long
     Dim isHeader As Boolean
 
     csvPath = "D:\資料查詢\MultiTF_Signals.csv"
@@ -286,13 +293,12 @@ Private Sub ImportMultiTFSignals(ByVal wsReport As Worksheet)
     If Len(Dir(csvPath)) = 0 Then Exit Sub   ' 量化面板還沒跑過，安靜跳過
 
     On Error GoTo ERR_HANDLER
-    fileNum = FreeFile
-    Open csvPath For Input As #fileNum
+
+    lines = ReadFileUTF8Lines(csvPath)
 
     isHeader = True
-    Do While Not EOF(fileNum)
-        Line Input #fileNum, lineStr
-        lineStr = Trim$(lineStr)
+    For i = LBound(lines) To UBound(lines)
+        lineStr = Trim$(lines(i))
 
         If isHeader Then
             isHeader = False
@@ -318,18 +324,38 @@ Private Sub ImportMultiTFSignals(ByVal wsReport As Worksheet)
 
             End If
         End If
-    Loop
+    Next i
 
-    Close #fileNum
     Exit Sub
 
 ERR_HANDLER:
-    On Error Resume Next
-    If fileNum > 0 Then Close #fileNum
-    On Error GoTo 0
     ' 這個來源失敗不彈錯誤視窗，安靜略過即可(不影響主流程)
 
 End Sub
+
+' 用 ADODB.Stream 以UTF-8明確讀取整個文字檔並拆成行陣列，
+' 不像 Open...For Input 那樣受系統語系(Big5/ANSI)影響而導致中文亂碼。
+Private Function ReadFileUTF8Lines(ByVal path As String) As String()
+    Dim stream As Object
+    Dim content As String
+
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 2            ' adTypeText
+    stream.Charset = "utf-8"
+    stream.Open
+    stream.LoadFromFile path
+    content = stream.ReadText
+    stream.Close
+
+    ' 去掉UTF-8 BOM(如果檔案開頭有的話)
+    If Len(content) > 0 Then
+        If AscW(Left$(content, 1)) = 65279 Then content = Mid$(content, 2)
+    End If
+
+    content = Replace(content, vbCrLf, vbLf)
+    content = Replace(content, vbCr, vbLf)
+    ReadFileUTF8Lines = Split(content, vbLf)
+End Function
 
 Private Function FindReportRowBySymbol(ByVal wsReport As Worksheet, ByVal sym As String) As Long
     Dim r As Long
