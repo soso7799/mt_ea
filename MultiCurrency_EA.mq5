@@ -1,10 +1,11 @@
 //+------------------------------------------------------------------+
-//  MultiCurrency_EA.mq5  v5.2
+//  MultiCurrency_EA.mq5  v5.3
 //  7幣別平等競爭，ATR動能排序
 //  5個指標全部同向 → 訂單上限由FilterLib控制
 //  風控全部由 FilterLib_v5.mqh 處理
+//  v5.3: ArraySetAsSeries 全面修正，清理未使用代碼
 //------------------------------------------------------------------+
-#property version "5.20"
+#property version "5.30"
 #include <FilterLib_v5.mqh>
 
 input group "=== Basic ==="
@@ -80,7 +81,6 @@ int weight[IND_COUNT] = {3,2,1,2,1};
 
 string   symbols[SYM_COUNT];
 datetime lastBarTime[SYM_COUNT];
-int startIndex=0;
 
 struct SHandles { int ef,es,rsi,bb,macd,stoch; };
 SHandles H[SYM_COUNT];
@@ -90,8 +90,6 @@ double g_bs[SYM_COUNT];
 int    g_mf[SYM_COUNT],g_ms[SYM_COUNT],g_mg[SYM_COUNT];
 int    g_kp[SYM_COUNT],g_kk[SYM_COUNT],g_kd[SYM_COUNT];
 int    g_ros[SYM_COUNT],g_rob[SYM_COUNT];
-
-struct SCandidate { int si; int sig; double atr; int confirm; };
 
 //------------------------------------------------------------------
 bool CheckNewBar(int idx)
@@ -140,22 +138,6 @@ bool HasPos(string sym)
    return false;
 }
 
-double GetAtrPips(int si)
-{
-   int h=iATR(symbols[si],PERIOD_M12,14);
-   if(h==INVALID_HANDLE) return 0;
-   double buf[]; ArraySetAsSeries(buf,true);
-   double atr=0;
-   if(CopyBuffer(h,0,1,1,buf)>0)
-   {
-      int d=(int)SymbolInfoInteger(symbols[si],SYMBOL_DIGITS);
-      double pip=(d==2||d==3)?0.01:0.0001;
-      atr=buf[0]/pip;
-   }
-   IndicatorRelease(h);
-   return atr;
-}
-
 //------------------------------------------------------------------
 int OnInit()
 {
@@ -195,7 +177,7 @@ int OnInit()
       { Print("Init failed: ",s); return INIT_FAILED; }
       lastBarTime[i]=0;
    }
-   Print("EA v5.2 started");
+   Print("EA v5.3 started");
    return INIT_SUCCEEDED;
 }
 
@@ -217,6 +199,8 @@ int GetOneSignal(int si,int indType)
 if(indType==0)
 {
    double ef[3],es[3];
+   ArraySetAsSeries(ef,true);
+   ArraySetAsSeries(es,true);
    double c0=iClose(symbols[si],PERIOD_M12,1);
 
    if(CopyBuffer(H[si].ef,0,1,3,ef)<3) return 0;
@@ -257,6 +241,7 @@ if(indType==0)
 if(indType==1)
 {
    double r[3];
+   ArraySetAsSeries(r,true);
 
    if(CopyBuffer(H[si].rsi,0,1,3,r)<3)
       return 0;
@@ -297,6 +282,9 @@ if(indType==1)
 if(indType==2)
 {
    double up[2],lo[2],mid[2];
+   ArraySetAsSeries(mid,true);
+   ArraySetAsSeries(up,true);
+   ArraySetAsSeries(lo,true);
 
    if(CopyBuffer(H[si].bb,0,1,2,mid)<2) return 0;
    if(CopyBuffer(H[si].bb,1,1,2,up)<2)  return 0;
@@ -334,6 +322,9 @@ if(indType==2)
 if(indType==3)
 {
    double macd[3],signal[3],hist[3];
+   ArraySetAsSeries(macd,true);
+   ArraySetAsSeries(signal,true);
+   ArraySetAsSeries(hist,true);
 
    if(CopyBuffer(H[si].macd,0,1,3,macd)<3) return 0;
    if(CopyBuffer(H[si].macd,1,1,3,signal)<3) return 0;
@@ -383,23 +374,25 @@ if(indType==3)
    if(indType==4)
    {
       double kv[3],dv[3];
+      ArraySetAsSeries(kv,true);
+      ArraySetAsSeries(dv,true);
 
       if(CopyBuffer(H[si].stoch,MAIN_LINE,1,3,kv)<3) return 0;
       if(CopyBuffer(H[si].stoch,SIGNAL_LINE,1,3,dv)<3) return 0;
 
       if(
-         kv[2]<=dv[2] &&
-         kv[1]>dv[1] &&
-         kv[1]<30 &&
-         kv[1]>kv[2]
+         kv[1]<=dv[1] &&
+         kv[0]>dv[0] &&
+         kv[0]<30 &&
+         kv[0]>kv[1]
       )
          return 1;
 
       if(
-         kv[2]>=dv[2] &&
-         kv[1]<dv[1] &&
-         kv[1]>70 &&
-         kv[1]<kv[2]
+         kv[1]>=dv[1] &&
+         kv[0]<dv[0] &&
+         kv[0]>70 &&
+         kv[0]<kv[1]
       )
          return -1;
 
@@ -451,7 +444,7 @@ void GetSignalWithConfirm(int si, int &sig, int &confirm)
 //------------------------------------------------------------------
 
 
-void TryOpenPositions()
+void TryOpenPositions(int curPos)
 {
   
   
@@ -507,9 +500,8 @@ void TryOpenPositions()
 
    // ★ 由 FilterLib 統一決定是否允許開倉，並提供 SL/TP
    double sl=0, tp=0;
-   int curRiskPos = CountPos(); // 用 magic 計算較準（PositionsTotal()會含其他EA/手動單）
 
-   if(!filter.AllowTrading(sym, sig, sl, tp, curRiskPos, Inp_MaxPos))
+   if(!filter.AllowTrading(sym, sig, sl, tp, curPos, Inp_MaxPos))
       return;
    double lot = filter.GetLotSize(sym);
 
@@ -529,17 +521,19 @@ void TryOpenPositions()
 void OnTick()
 {
    filter.MonitorPositions();
-   TryOpenPositions();
+
+   int curPos = CountPos();
+   TryOpenPositions(curPos);
 
    string posInfo="";
    for(int i=0;i<SYM_COUNT;i++)
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
    Comment(
-      "MultiCurrency EA v5.2\n",
+      "MultiCurrency EA v5.3\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       Inp_Sym1+"/"+Inp_Sym2+"/"+Inp_Sym3+"/"+
       Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"\n",
-     "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
+     "持倉("+IntegerToString(curPos)+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
       filter.GetStatusReport(symbols[0])
    );
 }
