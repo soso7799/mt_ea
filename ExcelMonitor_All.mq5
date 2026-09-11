@@ -278,8 +278,14 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    string compositeJudge;
    double compositeScore = ComputeComposite11(rates, copied, compositeJudge);
 
-   //---------------- 11. 今日開盤至現在漲跌% (欄36，新增) ----------------
-   double dailyOpen = iOpen(sym, PERIOD_D1, 0);
+   //---------------- 11. 今日開盤至現在漲跌% (欄36) ----------------
+   // 修正：OnInit() 會在 EA 剛啟動時就馬上呼叫一次 WriteAllRows()，這時候
+   // 終端機通常還沒把該商品的D1(日線)歷史資料同步完成，iOpen() 在資料還沒
+   // 同步好之前可能會拿到不完整/錯誤的K棒，算出來的漲跌%就會離譜地大
+   // (例如 -58%、99% 這種不合理的單日漲跌)。加上 SERIES_SYNCHRONIZED 檢查，
+   // 資料還沒同步好之前先回傳0，等下一次(每UpdateSeconds秒)更新時通常就正常了。
+   bool d1Ready = (Bars(sym, PERIOD_D1) >= 2) && SeriesInfoInteger(sym, PERIOD_D1, SERIES_SYNCHRONIZED);
+   double dailyOpen = d1Ready ? iOpen(sym, PERIOD_D1, 0) : 0;
    double todayChangePct = (dailyOpen != 0) ? (bid - dailyOpen) / dailyOpen * 100.0 : 0;
 
    //---------------- 12. 歐亞美盤高低點：用量能判斷是否會突破 (欄38~39，新增) ----------------
