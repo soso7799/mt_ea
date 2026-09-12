@@ -53,10 +53,45 @@ def load_csv(path: str) -> pd.DataFrame:
     return df
 
 
-def check_file(path: str, symbol: str, tf: str):
+def _scan_gaps(dates: pd.Series, tf: str, symbol: str, holiday_gap_days: float = 5.0):
+    """對一段已排序的時間序列掃描缺口，回傳 (suspicious_count, biggest_suspicious_gap_minutes,
+    max_gap_minutes, gap_segments_list)。跟check_file()原本內嵌的邏輯一致，抽出來給
+    「全部歷史」跟「只看最近N天」共用，不用寫兩次。"""
+    expected_gap = EXPECTED_GAP_MINUTES.get(tf)
+    if not expected_gap or len(dates) < 2:
+        return 0, 0.0, 0.0, []
+
+    suspicious = 0
+    max_gap = 0.0
+    biggest_suspicious_gap = 0.0
+    segments = []
+    dates = dates.reset_index(drop=True)
+    for i in range(1, len(dates)):
+        t_prev, t_cur = dates.iloc[i - 1], dates.iloc[i]
+        gap = (t_cur - t_prev).total_seconds() / 60.0
+        if gap > max_gap:
+            max_gap = gap
+        if gap > expected_gap * 20 and gap > holiday_gap_days * 24 * 60:
+            suspicious += 1
+            if gap > biggest_suspicious_gap:
+                biggest_suspicious_gap = gap
+            segments.append({
+                "symbol": symbol, "tf": tf,
+                "gap_start": str(t_prev), "gap_end": str(t_cur),
+                "gap_days": round(gap / 1440.0, 2),
+            })
+    return suspicious, biggest_suspicious_gap, max_gap, segments
+
+
+def check_file(path: str, symbol: str, tf: str, recent_days: int = 365):
     """回傳 (result_dict, gap_segments_list)。gap_segments_list 是這個檔案裡每一段
     「可疑缺漏」的明確起訖時間，直接可以拿去當作「該重新下載哪一段」的清單，
-    不用自己再回頭肉眼比對。"""
+    不用自己再回頭肉眼比對。
+
+    result_dict 同時包含「全部歷史」跟「只看最近recent_days天」兩組獨立的檢查結果
+    (rows/status/notes 是全部歷史；recent_*開頭的是最近N天)——通常只要「最近N天」
+    是乾淨的就夠拿去做參數優化，很久以前的舊缺口(例如商品中途換過代碼留下的洞)
+    大部分情況下不用理會，看 recent_status 就好。"""
     result = {
         "file": os.path.basename(path),
         "symbol": symbol,
@@ -72,6 +107,10 @@ def check_file(path: str, symbol: str, tf: str):
         "zero_or_negative_price": 0,
         "notes_gap_detail": "",
         "notes": "",
+        "recent_status": "OK",
+        "recent_rows": 0,
+        "recent_missing_bars_estimate": 0,
+        "recent_notes": "",
     }
     gap_segments = []
 
@@ -112,36 +151,17 @@ def check_file(path: str, symbol: str, tf: str):
     ).sum())
     result["ohlc_violations"] = viol
 
-    expected_gap = EXPECTED_GAP_MINUTES.get(tf)
-    if expected_gap and len(df) > 1:
-        # 假日(聖誕/元旦/國定假日等)常常從週三~週五就開始收假，一路連到隔週一/二才開盤，
-        # 這種長間隔完全正常，不該被當成資料缺漏——不管缺口是從星期幾開始，只要總長度在
-        # 「一般連續假期」的合理範圍內(最多HOLIDAY_GAP_DAYS天)，就不算可疑。
-        # 只有超過這個天數的缺口(通常代表商品中途換過代碼、資料庫本身有洞)才會被列為可疑，
-        # 每一段可疑缺口都記下確切的起訖時間，存進gap_segments給merge_csv_segments.py用。
-        HOLIDAY_GAP_DAYS = 5
-        suspicious = 0
-        max_gap = 0.0
-        biggest_suspicious_gap = 0.0
-        for i in range(1, len(df)):
-            t_prev = df["date"].iloc[i - 1]
-            t_cur = df["date"].iloc[i]
-            gap = (t_cur - t_prev).total_seconds() / 60.0
-            if gap > max_gap:
-                max_gap = gap
-            if gap > expected_gap * 20 and gap > HOLIDAY_GAP_DAYS * 24 * 60:
-                suspicious += 1
-                if gap > biggest_suspicious_gap:
-                    biggest_suspicious_gap = gap
-                gap_segments.append({
-                    "symbol": symbol, "tf": tf,
-                    "gap_start": str(t_prev), "gap_end": str(t_cur),
-                    "gap_days": round(gap / 1440.0, 2),
-                })
-        result["missing_bars_estimate"] = suspicious
-        result["biggest_gap"] = f"{max_gap:.0f}分鐘"
-        if suspicious > 0:
-            result["notes_gap_detail"] = f"最大可疑缺口約{biggest_suspicious_gap/1440:.1f}天"
+    # 假日(聖誕/元旦/國定假日等)常常從週三~週五就開始收假，一路連到隔週一/二才開盤，
+    # 這種長間隔完全正常，不該被當成資料缺漏——不管缺口是從星期幾開始，只要總長度在
+    # 「一般連續假期」的合理範圍內，就不算可疑。只有超過這個天數的缺口(通常代表商品
+    # 中途換過代碼、資料庫本身有洞)才會被列為可疑，每一段都記下確切的起訖時間，
+    # 存進gap_segments給merge_csv_segments.py用。
+    suspicious, biggest_suspicious_gap, max_gap, segments = _scan_gaps(df["date"], tf, symbol)
+    gap_segments.extend(segments)
+    result["missing_bars_estimate"] = suspicious
+    result["biggest_gap"] = f"{max_gap:.0f}分鐘"
+    if suspicious > 0:
+        result["notes_gap_detail"] = f"最大可疑缺口約{biggest_suspicious_gap/1440:.1f}天"
 
     problems = []
     if dup_count > 0:
@@ -162,12 +182,46 @@ def check_file(path: str, symbol: str, tf: str):
         result["status"] = "警告"
         result["notes"] = "；".join(problems)
 
+    # ---- 只看最近 recent_days 天：這才是「現在能不能拿去優化」真正要看的欄位，
+    # 很久以前的舊缺口(商品換過代碼之類)只要不影響最近這段，可以不用管。----
+    cutoff = df["date"].iloc[-1] - pd.Timedelta(days=recent_days)
+    recent_df = df[df["date"] >= cutoff].reset_index(drop=True)
+    result["recent_rows"] = len(recent_df)
+
+    recent_problems = []
+    if len(recent_df) < 300:
+        recent_problems.append(f"最近{recent_days}天只有{len(recent_df)}根，可能不夠拿去做參數優化")
+
+    recent_dup = int(recent_df["date"].duplicated().sum()) if len(recent_df) > 0 else 0
+    if recent_dup > 0:
+        recent_problems.append(f"{recent_dup}筆重複時間戳")
+
+    if len(recent_df) > 0:
+        recent_viol = int((
+            (recent_df["high"] < recent_df[["open", "close", "low"]].max(axis=1)) |
+            (recent_df["low"] > recent_df[["open", "close", "high"]].min(axis=1))
+        ).sum())
+        if recent_viol > 0:
+            recent_problems.append(f"{recent_viol}筆OHLC邏輯錯誤")
+
+    r_suspicious, r_biggest, _, _ = _scan_gaps(recent_df["date"], tf, symbol) if len(recent_df) > 1 else (0, 0.0, 0.0, [])
+    result["recent_missing_bars_estimate"] = r_suspicious
+    if r_suspicious > 0:
+        recent_problems.append(f"最近{recent_days}天內疑似{r_suspicious}處異常缺漏(最大約{r_biggest/1440:.1f}天)")
+
+    if recent_problems:
+        result["recent_status"] = "警告"
+        result["recent_notes"] = "；".join(recent_problems)
+
     return result, gap_segments
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", required=True, help="Data Console匯出CSV的資料夾")
+    ap.add_argument("--recent-days", type=int, default=365,
+                     help="只看最近幾天的資料夠不夠乾淨(預設365天=1年)，"
+                          "這是實際拿去做參數優化真正要看的欄位，很久以前的舊缺口通常不用管")
     args = ap.parse_args()
 
     pattern = os.path.join(args.data_dir, "*_ALL_DATA_*.csv")
@@ -187,7 +241,7 @@ def main():
             print(f"  [跳過，檔名格式看不懂] {base}")
             continue
         symbol, tf = m.group(1), m.group(2).upper()
-        result, gap_segments = check_file(path, symbol, tf)
+        result, gap_segments = check_file(path, symbol, tf, recent_days=args.recent_days)
         rows.append(result)
         all_gap_segments.extend(gap_segments)
 
@@ -195,18 +249,25 @@ def main():
     out_path = os.path.join(args.data_dir, "DataQualityReport.csv")
     report.to_csv(out_path, index=False, encoding="utf-8-sig")
 
+    # ---- 最近N天(重點)：這是實際能不能拿去優化真正要看的結果 ----
+    recent_ok = (report["recent_status"] == "OK").sum()
+    recent_warn = (report["recent_status"] == "警告").sum()
+    print(f"\n=== 最近{args.recent_days}天資料狀況(這是重點) ===")
+    print(f"共檢查 {len(report)} 個檔案：最近{args.recent_days}天乾淨 {recent_ok}　有問題 {recent_warn}")
+    if recent_warn > 0:
+        print("最近這段時間需要留意的檔案：")
+        for _, r in report[report["recent_status"] != "OK"].iterrows():
+            print(f"  [{r['symbol']} {r['tf']}] {r['recent_notes']}")
+    else:
+        print(f"最近{args.recent_days}天的資料全部乾淨，可以直接拿去跑 vegas_backtest_optimizer.py 了。")
+
+    # ---- 全部歷史(參考用)：很久以前的舊缺口通常不用理會，只是留個紀錄 ----
     ok = (report["status"] == "OK").sum()
     warn = (report["status"] == "警告").sum()
     fail = (report["status"] == "FAIL").sum()
-    print(f"\n共檢查 {len(report)} 個檔案：正常 {ok}　警告 {warn}　失敗 {fail}")
-    print(f"完整報告已存到：{out_path}\n")
-
-    if warn > 0 or fail > 0:
-        print("需要留意的檔案：")
-        for _, r in report[report["status"] != "OK"].iterrows():
-            print(f"  [{r['status']}] {r['symbol']} {r['tf']}: {r['notes']}")
-    else:
-        print("全部檔案都正常，可以直接拿去跑 vegas_backtest_optimizer.py 了。")
+    print(f"\n=== 全部歷史資料狀況(參考用，不影響能不能優化) ===")
+    print(f"共檢查 {len(report)} 個檔案：正常 {ok}　警告 {warn}　失敗 {fail}")
+    print(f"完整報告已存到：{out_path}")
 
     if all_gap_segments:
         gap_path = os.path.join(args.data_dir, "GapSegments.csv")
