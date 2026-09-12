@@ -72,6 +72,7 @@ import itertools
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -85,19 +86,27 @@ SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF",
 TIMEFRAMES = ["M5", "M15", "H1", "H4", "D1"]
 
 # ---- 搜參範圍(可自行調整；範圍越大跑越久) ----
+# 注意：這是純Python逐K棒迴圈(不是向量化計算)，組合數 x 資料根數 直接等於運算量。
+# 預設值搭配下面的 DEFAULT_MAX_BARS，每個(商品,週期)大約幾分鐘內跑完；
+# 想要更精細的搜尋，先確認能接受等待時間變長，再放寬這幾個GRID。
 GRID_LONG_A = [100, 144, 169, 200]
 GRID_LONG_B = [144, 169, 200, 233]
 GRID_SHORT_A = [21, 34, 55]
 GRID_SHORT_B = [55, 89, 144]
-GRID_FILTER = [50, 100, 150, 200]
+GRID_FILTER = [50, 100, 150]
 
 GRID_VOL_THRESHOLD = [1.0, 1.2, 1.5]
-GRID_VOL_AVG_BARS = [14, 20, 30]
-GRID_SLOPE_LOOKBACK = [3, 5, 8]
+GRID_VOL_AVG_BARS = [14, 20]
+GRID_SLOPE_LOOKBACK = [3, 8]
 
 ATR_PERIOD = 14
 ATR_MULTIPLIER = 2.0  # 跟EA的input ATRMultiplier一致
 MIN_BARS_MARGIN = 30  # 額外緩衝根數，避免EMA/HMA warmup吃掉太多可用資料
+
+# 每個(商品,週期)最多用最近多少根K棒來優化(值太大在M5/M15這種細週期上會慢到不可行，
+# 因為這是逐K棒的Python迴圈，運算量=組合數x根數；較舊的資料對「現在該用哪組參數」
+# 參考價值本來也比較低)。可用 --max-bars 覆蓋。
+DEFAULT_MAX_BARS = 15000
 
 
 # =====================================================================
@@ -243,21 +252,45 @@ class VegasParams:
     slope_lookback: int
 
 
-def compute_vegas_directions(df: pd.DataFrame, p: VegasParams) -> np.ndarray:
-    """回傳跟df等長的方向陣列：+1多／-1空／0無訊號，每個k代表「收在k那根K棒時」的訊號。"""
-    close = df["close"].to_numpy()
-    volume = df["volume"].to_numpy()
+def precompute_indicator_cache(close: np.ndarray, volume: np.ndarray):
+    """把每個會用到的EMA週期、Hull MA週期、成交量均量根數，各自只算一次，存進dict。
+    這是效能的關鍵：原本每個(la,lb,sa,sb,f,vt,vb,sl)組合都會重算一次EMA/HullMA，
+    但Hull MA本身是O(n*sqrt(period)*period)的巢狀迴圈，重算幾千次會慢到不可行；
+    這裡改成只算「所有GRID裡出現過的獨立週期值」各一次，後面每個組合直接查表。"""
+    ema_periods = set(GRID_LONG_A) | set(GRID_LONG_B) | set(GRID_SHORT_A) | set(GRID_SHORT_B)
+    ema_cache = {p: ema_sma_seeded(close, p) for p in ema_periods}
+
+    hma_cache = {p: hull_ma(close, p) for p in set(GRID_FILTER)}
+
+    n = len(volume)
+    cumvol = np.concatenate(([0.0], np.cumsum(volume.astype(float))))
+    vol_avg_cache = {}
+    for vb in set(GRID_VOL_AVG_BARS):
+        avg = np.full(n, np.nan)
+        for k in range(vb, n):
+            avg[k] = (cumvol[k] - cumvol[k - vb]) / vb
+        vol_avg_cache[vb] = avg
+
+    return ema_cache, hma_cache, vol_avg_cache
+
+
+def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasParams,
+                              ema_cache: dict, hma_cache: dict, vol_avg_cache: dict) -> np.ndarray:
+    """回傳跟close等長的方向陣列：+1多／-1空／0無訊號，每個k代表「收在k那根K棒時」的訊號。
+    EMA/HullMA/成交量均量都是從預先算好的cache查表，這個函式本身只做逐K棒的訊號判斷。"""
     n = len(close)
 
-    ema_la = ema_sma_seeded(close, p.long_a)
-    ema_lb = ema_sma_seeded(close, p.long_b)
-    ema_sa = ema_sma_seeded(close, p.short_a)
-    ema_sb = ema_sma_seeded(close, p.short_b)
-    ema_f = hull_ma(close, p.filter_p)
+    ema_la = ema_cache[p.long_a]
+    ema_lb = ema_cache[p.long_b]
+    ema_sa = ema_cache[p.short_a]
+    ema_sb = ema_cache[p.short_b]
+    ema_f = hma_cache[p.filter_p]
+    vol_avg = vol_avg_cache[p.vol_avg_bars]
 
     directions = np.zeros(n, dtype=int)
 
-    warmup = max(p.long_a, p.long_b, p.filter_p + max(1, round(math.sqrt(p.filter_p)))) + p.slope_lookback + 3
+    warmup = max(p.long_a, p.long_b, p.filter_p + max(1, round(math.sqrt(p.filter_p))),
+                 p.vol_avg_bars) + p.slope_lookback + 3
     for k in range(warmup, n - 1):  # 留最後一根給"下一根"用不到，這裡k本身就是「已收完」的那根
         if k - p.slope_lookback < 0:
             continue
@@ -269,8 +302,7 @@ def compute_vegas_directions(df: pd.DataFrame, p: VegasParams) -> np.ndarray:
         long_upper_prev = max(ema_la[k - 1], ema_lb[k - 1])
         long_lower_prev = min(ema_la[k - 1], ema_lb[k - 1])
 
-        vb = min(p.vol_avg_bars, k)
-        avg_vol = volume[k - vb:k].mean() if vb > 0 else volume[k]
+        avg_vol = vol_avg[k]
         vol_ok = avg_vol > 0 and volume[k] > avg_vol * p.vol_threshold
 
         long_upper_old = max(ema_la[k - p.slope_lookback], ema_lb[k - p.slope_lookback])
@@ -439,7 +471,13 @@ def optimize_symbol_tf(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFrame:
     high = df["high"].to_numpy()
     low = df["low"].to_numpy()
     close = df["close"].to_numpy()
+    volume = df["volume"].to_numpy()
     atr = atr_series(high, low, close, ATR_PERIOD)
+
+    print(f"  {symbol} {tf}: 預先計算EMA/HullMA/成交量均量(每個週期只算一次)...")
+    precompute_start = time.time()
+    ema_cache, hma_cache, vol_avg_cache = precompute_indicator_cache(close, volume)
+    print(f"  {symbol} {tf}: 預先計算完成，花了{time.time()-precompute_start:.1f}秒")
 
     rows = []
     tunnel_combos = [
@@ -450,14 +488,31 @@ def optimize_symbol_tf(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFrame:
         if lb > la and sb > sa
     ]
 
+    total_combos = len(tunnel_combos) * len(GRID_VOL_THRESHOLD) * len(GRID_VOL_AVG_BARS) * len(GRID_SLOPE_LOOKBACK)
+    print(f"  {symbol} {tf}: {len(df)}根K棒 x {total_combos}組參數組合，開始搜尋...")
+    start_time = time.time()
+    done = 0
+    last_report = start_time
+
     for (la, lb, sa, sb, f) in tunnel_combos:
         for vt in GRID_VOL_THRESHOLD:
             for vb in GRID_VOL_AVG_BARS:
                 for sl in GRID_SLOPE_LOOKBACK:
+                    done += 1
+                    now = time.time()
+                    if now - last_report >= 15:  # 每15秒回報一次進度，避免看起來像當機
+                        elapsed = now - start_time
+                        rate = done / elapsed if elapsed > 0 else 0
+                        remaining = (total_combos - done) / rate if rate > 0 else float("nan")
+                        print(f"    進度 {done}/{total_combos} "
+                              f"({done/total_combos:.0%})，已耗時{elapsed/60:.1f}分鐘，"
+                              f"預估剩餘{remaining/60:.1f}分鐘")
+                        last_report = now
+
                     params = VegasParams(la, lb, sa, sb, f, vt, vb, sl)
                     if len(df) < max(la, lb, f) + MIN_BARS_MARGIN:
                         continue
-                    directions = compute_vegas_directions(df, params)
+                    directions = compute_vegas_directions(close, volume, params, ema_cache, hma_cache, vol_avg_cache)
                     if not np.any(directions):
                         continue
                     atr_stats = simulate_atr_exit(df, directions, atr)
@@ -475,6 +530,8 @@ def optimize_symbol_tf(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFrame:
                     row.update(sig_stats.as_dict("sig"))
                     rows.append(row)
 
+    print(f"  {symbol} {tf}: 搜尋完成，共花費{(time.time()-start_time)/60:.1f}分鐘")
+
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
@@ -486,6 +543,9 @@ def main():
     ap.add_argument("--out-dir", required=True, help="結果輸出資料夾")
     ap.add_argument("--symbols", default=",".join(SYMBOLS), help="逗號分隔的商品清單，預設12個商品全跑")
     ap.add_argument("--timeframes", default=",".join(TIMEFRAMES), help="逗號分隔的週期清單，預設M5,M15,H1,H4,D1全跑")
+    ap.add_argument("--max-bars", type=int, default=DEFAULT_MAX_BARS,
+                     help=f"每個(商品,週期)最多用最近幾根K棒來優化，預設{DEFAULT_MAX_BARS}"
+                          "(這是逐K棒Python迴圈，值越大跑越久；0表示不限制，用全部資料)")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -503,6 +563,10 @@ def main():
             if df is None or len(df) < 300:
                 print(f"  跳過：找不到資料或資料筆數太少(需要至少300根，目前{0 if df is None else len(df)}根)")
                 continue
+
+            if args.max_bars > 0 and len(df) > args.max_bars:
+                print(f"  資料共{len(df)}根，只取最近{args.max_bars}根來優化(用 --max-bars 調整)")
+                df = df.iloc[-args.max_bars:].reset_index(drop=True)
 
             result_df = optimize_symbol_tf(df, symbol, tf)
             if result_df.empty:
