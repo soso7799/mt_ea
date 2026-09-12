@@ -466,7 +466,112 @@ def score_combo(atr_stats: TradeStats, sig_stats: TradeStats, min_trades: int = 
     return max(scores) if scores else -999.0
 
 
-def optimize_symbol_tf(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFrame:
+def optimize_symbol_tf(df: pd.DataFrame, symbol: str, tf: str, mode: str = "greedy") -> pd.DataFrame:
+    """入口：mode="greedy"(預設，重點式，快)或"full"(全網格窮舉，慢但更完整)。"""
+    if mode == "full":
+        return optimize_symbol_tf_full(df, symbol, tf)
+    return optimize_symbol_tf_greedy(df, symbol, tf)
+
+
+# 重點式搜尋固定用的經典起始值(跟EA本身的input預設值一致)
+DEFAULT_LONG_A, DEFAULT_LONG_B = 144, 169
+DEFAULT_SHORT_A, DEFAULT_SHORT_B = 34, 55
+DEFAULT_FILTER = 100
+DEFAULT_VOL_THRESHOLD, DEFAULT_VOL_AVG_BARS, DEFAULT_SLOPE_LOOKBACK = 1.2, 20, 5
+
+
+def optimize_symbol_tf_greedy(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFrame:
+    """重點式(座標下降)搜尋：其他參數先固定在經典預設值，一次只調一組維度
+    (長隧道→短隧道→過濾線→成交量濾網)，每步驟結束後只保留該步驟裡分數最高的值，
+    帶著往下一步繼續。組合數從全網格的近2000組降到約30~40組，速度快非常多，
+    代價是不保證找到全域最佳解(座標下降法的固有限制)，但對於「先有一組堪用的
+    參數」這個目的來說已經足夠，且仍然把每一步測試過的組合都記進summary，
+    想要更完整的搜尋可以之後對特定商品週期改用 --mode full。"""
+    high = df["high"].to_numpy()
+    low = df["low"].to_numpy()
+    close = df["close"].to_numpy()
+    volume = df["volume"].to_numpy()
+    atr = atr_series(high, low, close, ATR_PERIOD)
+
+    print(f"  {symbol} {tf}: 預先計算EMA/HullMA/成交量均量(每個週期只算一次)...")
+    precompute_start = time.time()
+    ema_cache, hma_cache, vol_avg_cache = precompute_indicator_cache(close, volume)
+    print(f"  {symbol} {tf}: 預先計算完成，花了{time.time()-precompute_start:.1f}秒")
+
+    rows = []
+
+    def eval_combo(la, lb, sa, sb, f, vt, vb, sl):
+        if len(df) < max(la, lb, f) + MIN_BARS_MARGIN:
+            return None
+        p = VegasParams(la, lb, sa, sb, f, vt, vb, sl)
+        directions = compute_vegas_directions(close, volume, p, ema_cache, hma_cache, vol_avg_cache)
+        if not np.any(directions):
+            return None
+        atr_stats = simulate_atr_exit(df, directions, atr)
+        sig_stats = simulate_signal_exit(df, directions)
+        combo_score = score_combo(atr_stats, sig_stats)
+        row = {
+            "Symbol": symbol, "TF": tf,
+            "LongTunnelA": la, "LongTunnelB": lb,
+            "ShortTunnelA": sa, "ShortTunnelB": sb,
+            "FilterPeriod": f,
+            "VolThreshold": vt, "VolAvgBars": vb, "SlopeLookback": sl,
+            "score": round(combo_score, 4),
+        }
+        row.update(atr_stats.as_dict("atr"))
+        row.update(sig_stats.as_dict("sig"))
+        rows.append(row)
+        return combo_score
+
+    best = {
+        "la": DEFAULT_LONG_A, "lb": DEFAULT_LONG_B,
+        "sa": DEFAULT_SHORT_A, "sb": DEFAULT_SHORT_B,
+        "f": DEFAULT_FILTER,
+        "vt": DEFAULT_VOL_THRESHOLD, "vb": DEFAULT_VOL_AVG_BARS, "sl": DEFAULT_SLOPE_LOOKBACK,
+    }
+    best_score = -999.0
+    start_time = time.time()
+
+    # 第1步：長隧道(其餘固定在經典值)
+    for la in GRID_LONG_A:
+        for lb in GRID_LONG_B:
+            if lb <= la:
+                continue
+            s = eval_combo(la, lb, best["sa"], best["sb"], best["f"], best["vt"], best["vb"], best["sl"])
+            if s is not None and s > best_score:
+                best_score, best["la"], best["lb"] = s, la, lb
+
+    # 第2步：短隧道(用第1步選出的長隧道)
+    for sa in GRID_SHORT_A:
+        for sb in GRID_SHORT_B:
+            if sb <= sa:
+                continue
+            s = eval_combo(best["la"], best["lb"], sa, sb, best["f"], best["vt"], best["vb"], best["sl"])
+            if s is not None and s > best_score:
+                best_score, best["sa"], best["sb"] = s, sa, sb
+
+    # 第3步：過濾線(用前兩步選出的長短隧道)
+    for f in GRID_FILTER:
+        s = eval_combo(best["la"], best["lb"], best["sa"], best["sb"], f, best["vt"], best["vb"], best["sl"])
+        if s is not None and s > best_score:
+            best_score, best["f"] = s, f
+
+    # 第4步：成交量濾網(用前三步選出的通道+過濾線)
+    for vt in GRID_VOL_THRESHOLD:
+        for vb in GRID_VOL_AVG_BARS:
+            for sl in GRID_SLOPE_LOOKBACK:
+                s = eval_combo(best["la"], best["lb"], best["sa"], best["sb"], best["f"], vt, vb, sl)
+                if s is not None and s > best_score:
+                    best_score, best["vt"], best["vb"], best["sl"] = s, vt, vb, sl
+
+    print(f"  {symbol} {tf}: 重點式搜尋完成，共測試{len(rows)}組，花費{time.time()-start_time:.1f}秒")
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+
+
+def optimize_symbol_tf_full(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFrame:
     """對單一(Symbol,TF)跑完整網格搜尋，回傳一份DataFrame(每個組合一列)。"""
     high = df["high"].to_numpy()
     low = df["low"].to_numpy()
@@ -546,6 +651,11 @@ def main():
     ap.add_argument("--max-bars", type=int, default=DEFAULT_MAX_BARS,
                      help=f"每個(商品,週期)最多用最近幾根K棒來優化，預設{DEFAULT_MAX_BARS}"
                           "(這是逐K棒Python迴圈，值越大跑越久；0表示不限制，用全部資料)")
+    ap.add_argument("--mode", choices=["greedy", "full"], default="greedy",
+                     help="greedy(預設)：重點式座標下降搜尋，每個商品週期約30~40組合，"
+                          "幾秒到幾十秒就能跑完，但不保證全域最佳。"
+                          "full：全網格窮舉(近2000組合)，更完整但慢很多，"
+                          "適合先用greedy篩出方向後，針對少數幾個商品週期精修")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -568,7 +678,7 @@ def main():
                 print(f"  資料共{len(df)}根，只取最近{args.max_bars}根來優化(用 --max-bars 調整)")
                 df = df.iloc[-args.max_bars:].reset_index(drop=True)
 
-            result_df = optimize_symbol_tf(df, symbol, tf)
+            result_df = optimize_symbol_tf(df, symbol, tf, mode=args.mode)
             if result_df.empty:
                 print("  跳過：所有參數組合都湊不到足夠的交易筆數")
                 continue
