@@ -67,6 +67,7 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
         "biggest_gap": "",
         "ohlc_violations": 0,
         "zero_or_negative_price": 0,
+        "notes_gap_detail": "",
         "notes": "",
     }
 
@@ -109,22 +110,26 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
 
     expected_gap = EXPECTED_GAP_MINUTES.get(tf)
     if expected_gap and len(df) > 1:
-        diffs = df["date"].diff().dropna().dt.total_seconds() / 60.0
-        # 週末/假日休市造成的長間隔是正常的，只挑出「不是週末、但間隔仍然異常大」的當作真正缺漏
-        # 這裡用一個寬鬆但實用的門檻：超過 expected_gap * 20 且發生在週一~週五之間才算可疑缺漏
-        # (週五收盤到週日/週一開盤的長間隔會被自動排除，不會被誤判)
+        # 假日(聖誕/元旦/國定假日等)常常從週三~週五就開始收假，一路連到隔週一/二才開盤，
+        # 這種長間隔完全正常，不該被當成資料缺漏——不管缺口是從星期幾開始，只要總長度在
+        # 「一般連續假期」的合理範圍內(最多HOLIDAY_GAP_DAYS天)，就不算可疑。
+        # 只有超過這個天數的缺口(通常代表商品中途換過代碼、資料庫本身有洞)才會被列為可疑。
+        HOLIDAY_GAP_DAYS = 5
         suspicious = 0
         max_gap = 0.0
+        biggest_suspicious_gap = 0.0
         for i in range(1, len(df)):
             gap = (df["date"].iloc[i] - df["date"].iloc[i - 1]).total_seconds() / 60.0
             if gap > max_gap:
                 max_gap = gap
-            weekday_start = df["date"].iloc[i - 1].weekday()  # 0=Mon ... 6=Sun
-            is_weekend_gap = weekday_start >= 4 and gap > 24 * 60  # 週五之後的長間隔視為正常收假
-            if gap > expected_gap * 20 and not is_weekend_gap:
+            if gap > expected_gap * 20 and gap > HOLIDAY_GAP_DAYS * 24 * 60:
                 suspicious += 1
+                if gap > biggest_suspicious_gap:
+                    biggest_suspicious_gap = gap
         result["missing_bars_estimate"] = suspicious
         result["biggest_gap"] = f"{max_gap:.0f}分鐘"
+        if suspicious > 0:
+            result["notes_gap_detail"] = f"最大可疑缺口約{biggest_suspicious_gap/1440:.1f}天"
 
     problems = []
     if dup_count > 0:
@@ -134,7 +139,7 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
     if viol > 0:
         problems.append(f"{viol}筆OHLC邏輯錯誤(high/low不合理)")
     if result["missing_bars_estimate"] > 0:
-        problems.append(f"疑似{result['missing_bars_estimate']}處平日資料缺漏")
+        problems.append(f"疑似{result['missing_bars_estimate']}處異常缺漏({result['notes_gap_detail']})")
     if bad_dates > 0:
         problems.append(f"{bad_dates}筆日期欄位解析失敗")
     if result["rows"] < 300:

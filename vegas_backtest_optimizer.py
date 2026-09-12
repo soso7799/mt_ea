@@ -142,7 +142,27 @@ def load_symbol_tf_csv(data_dir: str, symbol: str, tf: str) -> Optional[pd.DataF
     for c in ("open", "high", "low", "close", "volume"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
+    df = _trim_before_large_gap(df, symbol, tf)
     return df
+
+
+def _trim_before_large_gap(df: pd.DataFrame, symbol: str, tf: str, max_gap_days: float = 30.0) -> pd.DataFrame:
+    """有些商品(常見於指數/CFD代碼中途換過)的歷史資料中間會有一段長達數月甚至數年的
+    真空期，不是假日休市那種正常缺口。EMA/ATR是按K棒index而非實際經過時間計算，
+    這種大洞不會讓程式出錯，但洞口銜接處會產生一根價格瞬間跳動的離譜K棒，污染ATR/
+    Vegas通道的判斷。這裡自動抓出最大缺口，超過max_gap_days天就只保留缺口之後的
+    資料(較新的資料本來也比較有參考價值)。"""
+    if len(df) < 2:
+        return df
+    gaps = df["date"].diff()
+    max_gap = gaps.max()
+    if pd.isna(max_gap) or max_gap.total_seconds() / 86400.0 <= max_gap_days:
+        return df
+    cut_idx = int(gaps.idxmax())
+    print(f"  [{symbol} {tf}] 偵測到 {max_gap.days} 天的異常缺口"
+          f"({df['date'].iloc[cut_idx-1]} -> {df['date'].iloc[cut_idx]})，"
+          f"只保留缺口之後的 {len(df) - cut_idx} 根資料。")
+    return df.iloc[cut_idx:].reset_index(drop=True)
 
 
 # =====================================================================
