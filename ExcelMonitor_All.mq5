@@ -99,15 +99,16 @@ void WriteAllRows()
       return;
    }
 
-   // 標題列(36欄，僅供人工檢視用，VBA匯入時會跳過這一行)
+   // 標題列(39欄，僅供人工檢視用，VBA匯入時會跳過這一行)
+   // v9：TodayChangePct 移到 Bid 後面(第3欄)，方便一眼看到現價+今日漲跌%
    FileWrite(handle,
-      "Symbol","Bid","AsiaLow","AsiaHigh","EuropeLow","EuropeHigh","USLow","USHigh",
+      "Symbol","Bid","TodayChangePct","AsiaLow","AsiaHigh","EuropeLow","EuropeHigh","USLow","USHigh",
       "WeekSupport","WeekResistance","RecentSupport","RecentResistance",
       "SupportTouch","ResistanceTouch","SupportValid","ResistanceValid",
       "ShortMA","LongMA","EMA","ShortMASlopePct","LongMASlopePct","EMASlopePct",
       "MAAlignment","CrossState","TrendScore","TrendJudgment","PersonalSL_ATR",
       "CurrentVolume","AverageVolume","VolumeState","FinalSignal",
-      "CandlePattern","EntrySignal","CompositeScore","CompositeJudgment","UpdateTime","TodayChangePct",
+      "CandlePattern","EntrySignal","CompositeScore","CompositeJudgment","UpdateTime",
       "SessionLevelTest","SessionBreakoutJudge");
 
    for(int i=0;i<SYMBOL_COUNT;i++)
@@ -133,11 +134,11 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    int copied = CopyRates(sym, PERIOD_M5, 0, needBars, rates);
    if(copied < longPeriod+SlopeLookback+2)
    {
-      // 資料不足也要寫滿37欄，避免VBA那邊又出現「欄位不足」錯誤
-      FileWrite(handle, sym,0,0,0,0,0,0,0,0,0,0,0,0,0,"待確認","待確認",
+      // 資料不足也要寫滿39欄，避免VBA那邊又出現「欄位不足」錯誤
+      FileWrite(handle, sym,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"待確認","待確認",
                  0,0,0,0,0,0,"資料不足","資料不足",0,"資料不足",0,0,0,"正常",
                  "資料不足","資料不足","資料不足",0,"資料不足",
-                 TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), 0,
+                 TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
                  "","資料不足");
       return;
    }
@@ -302,14 +303,14 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
 
    //---------------- 寫入一行 ----------------
    FileWrite(handle,
-      sym, bid, asiaLow, asiaHigh, euroLow, euroHigh, usLow, usHigh,
+      sym, bid, todayChangePct, asiaLow, asiaHigh, euroLow, euroHigh, usLow, usHigh,
       weekSupport, weekResistance, recentSupport, recentResistance,
       supportTouch, resistanceTouch, supportValid, resistanceValid,
       shortMA_now, longMA_now, ema_now, shortSlopePct, longSlopePct, emaSlopePct,
       maAlign, crossState, trendScore, trendJudge, personalSL,
       curVol, avgVol, volState, finalSignal,
       candlePattern, entrySignal, compositeScore, compositeJudge,
-      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), todayChangePct,
+      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
       sessionLevelTest, sessionBreakoutJudge);
 }
 
