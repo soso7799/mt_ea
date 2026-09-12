@@ -21,18 +21,23 @@
 #endif
 
 #property indicator_buffers 5
-#property indicator_plots   3
+#property indicator_plots   4
 #property indicator_label1  "長隧道(144/169)"
 #property indicator_type1   DRAW_FILLING
 #property indicator_color1  clrDeepSkyBlue
-#property indicator_label2  "短隧道(34/55)"
-#property indicator_type2   DRAW_FILLING
+#property indicator_label2  "短隧道上緣"
+#property indicator_type2   DRAW_LINE
 #property indicator_color2  clrOrange
-#property indicator_label3  "過濾線(HullMA)"
+#property indicator_width2  2
+#property indicator_label3  "短隧道下緣"
 #property indicator_type3   DRAW_LINE
-#property indicator_color3  clrYellow
+#property indicator_color3  clrOrange
 #property indicator_width3  2
-#property indicator_style3  STYLE_DASH
+#property indicator_label4  "過濾線(HullMA)"
+#property indicator_type4   DRAW_LINE
+#property indicator_color4  clrYellow
+#property indicator_width4  2
+#property indicator_style4  STYLE_DASH
 
 //================== 可調參數 ==================
 input string ShortMAPeriods  = "9,9,9,9,9,9,9,9,9,9,9,9";      // 短MA週期(給後台趨勢判斷邏輯用，跟圖表視覺化無關)
@@ -66,7 +71,10 @@ input int    LabelFontSize   = 11;
 input int    MinGapPixels    = 18;     // 支撐壓力文字防重疊間距(像素)
 input int    VolPanelX       = 10;
 input int    VolPanelY       = 90;     // 避開MT5內建倒數文字
-input int    TunnelMinVisualPoints = 15; // 雙通道視覺最小寬度(點)：實際週期算出來太窄時，畫圖用強制撐開到這個寬度，方向不變，只影響顯示
+input double LongTunnelMinVisualPixels  = 10; // 長隧道視覺最小寬度：直接以「螢幕像素」為單位，不管週期/商品/縮放比例，畫出來的粗細都一致。可直接在指標屬性視窗調整，不用重新編譯。
+input double ShortTunnelMinVisualPixels = 14; // 短隧道視覺最小寬度：同上，以像素為單位。短隧道天生貼著價格走，容易被密集的K棒蓋住，通常要比長隧道設大一點才露得出來。
+input double LongTunnelMinVisualPercent  = 0.05; // 備援用：抓不到目前可視價格範圍時，退回用價格百分比估算(正常情況下不會用到)
+input double ShortTunnelMinVisualPercent = 0.1;  // 備援用：同上
 
 #define SYMBOL_COUNT 12
 string Symbols[SYMBOL_COUNT] = {"EURUSD","GBPUSD","USDJPY","USDCAD","AUDUSD","NZDUSD","USDCHF",
@@ -403,7 +411,7 @@ int OnCalculate(const int rates_total,
 
    // 圖表上畫的雙通道，用跟訊號邏輯一樣的週期(會被VegasFilterParams.csv覆蓋成該周期
    // 回測出來的最佳化值)。如果算出來的線太貼近、視覺上看不出色塊，下面會強制撐開到
-   // 最小可視寬度(TunnelMinVisualPoints)，只影響畫面顯示，不影響CSV/訊號判斷用的實際數值。
+   // 最小可視寬度(TunnelMinVisualPercent，佔價格的百分比)，只影響畫面顯示，不影響CSV/訊號判斷用的實際數值。
    int longA = VegasLongAArr[ChartSymbolIdx];   if(longA<=0) longA = 144;
    int longB = VegasLongBArr[ChartSymbolIdx];   if(longB<=0) longB = 169;
    int shortA = VegasShortAArr[ChartSymbolIdx]; if(shortA<=0) shortA = 34;
@@ -415,7 +423,23 @@ int OnCalculate(const int rates_total,
    double a169 = 2.0/(longB+1.0);
    double a34  = 2.0/(shortA+1.0);
    double a55  = 2.0/(shortB+1.0);
-   double minGapPrice = TunnelMinVisualPoints * _Point;
+
+   // 最小可視寬度：以「螢幕像素」換算回價格寬度，只需要算一次(整張圖表共用同一個縮放比例)。
+   // 這樣不管周期/商品/縮放程度，畫出來的隧道粗細在螢幕上看起來都會一致。
+   double pxPerPrice = PixelsPerPrice();
+   double longMinGapPrice, shortMinGapPrice;
+   if(pxPerPrice > 0)
+   {
+      longMinGapPrice  = LongTunnelMinVisualPixels  / pxPerPrice;
+      shortMinGapPrice = ShortTunnelMinVisualPixels / pxPerPrice;
+   }
+   else
+   {
+      // 抓不到目前可視價格範圍(例如圖表剛載入)時，退回用價格百分比估算
+      double lastClose = MathAbs(close[rates_total-1]);
+      longMinGapPrice  = lastClose * LongTunnelMinVisualPercent  / 100.0;
+      shortMinGapPrice = lastClose * ShortTunnelMinVisualPercent / 100.0;
+   }
 
    for(int i=start; i<rates_total; i++)
    {
@@ -437,10 +461,9 @@ int OnCalculate(const int rates_total,
       // 過濾線改用Hull MA：不是遞迴公式，每根都直接依收盤價窗口重新計算
       FilterBuf[i] = CalcHMAAt(close, rates_total, filterPeriod, i);
 
-      // 最小可視寬度：兩條線太近(週期彼此接近時常見)就以中點為基準對稱撐開，
-      // 方向(誰在上誰在下)維持不變，純粹讓色塊肉眼看得見，不影響底層數值計算。
-      WidenForVisual(Ema144Buf[i], Ema169Buf[i], minGapPrice);
-      WidenForVisual(Ema34Buf[i],  Ema55Buf[i],  minGapPrice);
+      // 最小可視寬度：長隧道跟短隧道分開套用，方向不變，只影響顯示。
+      WidenForVisual(Ema144Buf[i], Ema169Buf[i], longMinGapPrice);
+      WidenForVisual(Ema34Buf[i],  Ema55Buf[i],  shortMinGapPrice);
    }
    return(rates_total);
 }
@@ -621,6 +644,8 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    else                          volState = "正常";
 
    //------------------ 最後：真正三層合成(支撐壓力 + 趨勢 + 成交量) ------------------
+   // 第一層貢獻：Bid若貼近「有效」的支撐/壓力位，給予對應方向的偏多/偏空加成；
+   //            優先看近期支撐壓力(較即時)，貼不到才退而看週線支撐壓力。
    double srBias = 0;
    double srTol = TouchTolPoints * pt;
    if(MathAbs(bid - recentSupport) <= srTol*2 && supportValid=="有效")           srBias = 1.0;
@@ -628,6 +653,7 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    else if(MathAbs(bid - weekSupport) <= srTol*2 && weekSupport>0)               srBias = 0.5;
    else if(MathAbs(bid - weekResistance) <= srTol*2 && weekResistance>0)         srBias = -0.5;
 
+   // 第三層貢獻：用成交量狀態當作信心倍率，放量加強訊號、縮量打折扣
    double volMult = (volState=="放量") ? 1.3 : (volState=="縮量") ? 0.7 : 1.0;
 
    double combinedScore = (weightedScore + srBias*0.5) * volMult;
@@ -639,10 +665,16 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    else if(combinedScore <= -0.4)  finalSignal = "偏空";
    else                            finalSignal = "震盪";
 
+   //====================================================================
+   // 作戰方式三個關鍵點：
+   //  1. 價格貼近「2個以上關鍵位重疊」的位置 + 成交量不等於均量(放量/縮量) + 近3根K棒出現經典反轉型態
+   //  2. 依三層合成的多空方向(finalSignal) + K棒型態，決定要不要進場
+   //  3. EMA斜度優先判斷方向是否允許進場(逆勢不建議進場，只當觀望)
+   //====================================================================
    string candlePattern = DetectCandlePattern(rates, copied);
 
    string zoneType = "";
-   string signalStrength = "";
+   string signalStrength = ""; // "強信號"(有重疊) 或 "普通信號"(只貼近單一關鍵位)
    bool hasKeyLevel = CheckKeyLevelConfluence(bid, weekSupport, weekResistance, recentSupport, recentResistance,
                                                 asiaLow, asiaHigh, euroLow, euroHigh, usLow, usHigh,
                                                 srTol, zoneType, signalStrength);
@@ -651,12 +683,14 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
 
    bool bullPattern = (candlePattern=="看漲吞噬" || candlePattern=="看漲針線" || candlePattern=="晨星(3根反轉)");
    bool bearPattern = (candlePattern=="看跌吞噬" || candlePattern=="看跌針線" || candlePattern=="昏星(3根反轉)");
+   // 十字星本身不分方向，只代表猶豫/可能反轉，交由所在區位(支撐/壓力)決定要對應哪個方向
 
    bool triggerLong  = hasKeyLevel && zoneType=="支撐" && volAnomaly &&
                         (bullPattern || (candlePattern=="十字星"));
    bool triggerShort = hasKeyLevel && zoneType=="壓力" && volAnomaly &&
                         (bearPattern || (candlePattern=="十字星"));
 
+   // 關鍵點3：EMA斜度優先判斷，逆勢不建議進場
    bool emaGateLong  = (emaSlopePct > 0);
    bool emaGateShort = (emaSlopePct < 0);
 
@@ -909,6 +943,13 @@ void UpdateChartVisuals()
 {
    CreateHLine(PFX+"RecSup",   clrLimeGreen,STYLE_DASH);
    CreateHLine(PFX+"RecRes",   clrTomato,   STYLE_DASH);
+   CreateHLine(PFX+"PrevClose",clrSilver,   STYLE_DOT);
+   CreateHLine(PFX+"AsiaHigh", clrAqua,     STYLE_DOT);
+   CreateHLine(PFX+"AsiaLow",  clrAqua,     STYLE_DOT);
+   CreateHLine(PFX+"EuroHigh", clrOrchid,   STYLE_DOT);
+   CreateHLine(PFX+"EuroLow",  clrOrchid,   STYLE_DOT);
+   CreateHLine(PFX+"UsHigh",   clrGold,     STYLE_DOT);
+   CreateHLine(PFX+"UsLow",    clrGold,     STYLE_DOT);
 
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
@@ -917,8 +958,8 @@ void UpdateChartVisuals()
    if(copied < RecentBars+2) return;
 
    MqlRates yd2[]; ArraySetAsSeries(yd2, true);
-   double recSup=0, recRes=0;
-   if(CopyRates(_Symbol, PERIOD_D1, 1, 1, yd2) == 1){ recSup=yd2[0].low; recRes=yd2[0].high; }
+   double recSup=0, recRes=0, prevClose=0;
+   if(CopyRates(_Symbol, PERIOD_D1, 1, 1, yd2) == 1){ recSup=yd2[0].low; recRes=yd2[0].high; prevClose=yd2[0].close; }
    if(recSup<=0 || recRes<=0)
    {
       recSup = rates[1].low; recRes = rates[1].high;
@@ -930,6 +971,19 @@ void UpdateChartVisuals()
    }
    MoveHLine(PFX+"RecSup", recSup);
    MoveHLine(PFX+"RecRes", recRes);
+   MoveHLine(PFX+"PrevClose", prevClose);
+
+   // 昨收盤後的亞歐美盤高低：直接沿用GetSessionRange()(原本就有算，只是拿掉了圖表顯示)
+   double asiaLow, asiaHigh, euroLow, euroHigh, usLow, usHigh;
+   GetSessionRange(_Symbol, 0, 8,  asiaLow, asiaHigh);
+   GetSessionRange(_Symbol, 8, 16, euroLow, euroHigh);
+   GetSessionRange(_Symbol, 13,22, usLow,   usHigh);
+   MoveHLine(PFX+"AsiaHigh", asiaHigh);
+   MoveHLine(PFX+"AsiaLow",  asiaLow);
+   MoveHLine(PFX+"EuroHigh", euroHigh);
+   MoveHLine(PFX+"EuroLow",  euroLow);
+   MoveHLine(PFX+"UsHigh",   usHigh);
+   MoveHLine(PFX+"UsLow",    usLow);
 
    int firstVisibleBar = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
    int leftShift = MathMax(firstVisibleBar - 3, 0);
@@ -943,6 +997,49 @@ void UpdateChartVisuals()
    EnsureTextObj(PFX+"Txt_RecRes", clrTomato);
    ObjectSetString(0, PFX+"Txt_RecRes", OBJPROP_TEXT, "近壓力 "+DoubleToString(recRes, _Digits));
    ObjectMove(0, PFX+"Txt_RecRes", 0, labelTime, recRes);
+
+   if(prevClose>0)
+   {
+      EnsureTextObj(PFX+"Txt_PrevClose", clrSilver);
+      ObjectSetString(0, PFX+"Txt_PrevClose", OBJPROP_TEXT, "昨收盤 "+DoubleToString(prevClose, _Digits));
+      ObjectMove(0, PFX+"Txt_PrevClose", 0, labelTime, prevClose);
+   }
+   if(asiaHigh>0)
+   {
+      EnsureTextObj(PFX+"Txt_AsiaHigh", clrAqua);
+      ObjectSetString(0, PFX+"Txt_AsiaHigh", OBJPROP_TEXT, "亞盤高 "+DoubleToString(asiaHigh, _Digits));
+      ObjectMove(0, PFX+"Txt_AsiaHigh", 0, labelTime, asiaHigh);
+   }
+   if(asiaLow>0)
+   {
+      EnsureTextObj(PFX+"Txt_AsiaLow", clrAqua);
+      ObjectSetString(0, PFX+"Txt_AsiaLow", OBJPROP_TEXT, "亞盤低 "+DoubleToString(asiaLow, _Digits));
+      ObjectMove(0, PFX+"Txt_AsiaLow", 0, labelTime, asiaLow);
+   }
+   if(euroHigh>0)
+   {
+      EnsureTextObj(PFX+"Txt_EuroHigh", clrOrchid);
+      ObjectSetString(0, PFX+"Txt_EuroHigh", OBJPROP_TEXT, "歐盤高 "+DoubleToString(euroHigh, _Digits));
+      ObjectMove(0, PFX+"Txt_EuroHigh", 0, labelTime, euroHigh);
+   }
+   if(euroLow>0)
+   {
+      EnsureTextObj(PFX+"Txt_EuroLow", clrOrchid);
+      ObjectSetString(0, PFX+"Txt_EuroLow", OBJPROP_TEXT, "歐盤低 "+DoubleToString(euroLow, _Digits));
+      ObjectMove(0, PFX+"Txt_EuroLow", 0, labelTime, euroLow);
+   }
+   if(usHigh>0)
+   {
+      EnsureTextObj(PFX+"Txt_UsHigh", clrGold);
+      ObjectSetString(0, PFX+"Txt_UsHigh", OBJPROP_TEXT, "美盤高 "+DoubleToString(usHigh, _Digits));
+      ObjectMove(0, PFX+"Txt_UsHigh", 0, labelTime, usHigh);
+   }
+   if(usLow>0)
+   {
+      EnsureTextObj(PFX+"Txt_UsLow", clrGold);
+      ObjectSetString(0, PFX+"Txt_UsLow", OBJPROP_TEXT, "美盤低 "+DoubleToString(usLow, _Digits));
+      ObjectMove(0, PFX+"Txt_UsLow", 0, labelTime, usLow);
+   }
 
    long curVol = rates[0].tick_volume;
    double sumVol=0; int volCount=0;
@@ -973,6 +1070,10 @@ void UpdateChartVisuals()
 
 //====================================================================
 // 11大指標三分類加權評分(跟 gordon_full_analysis.py 的分類權重一致)
+//   趨勢型(MA/MACD/布林/肯特納)      權重45%
+//   震盪型(RSI/KD/威廉%R/CCI/MTM)   權重35%(組內先平均，避免5個高相關指標灌票)
+//   其他(PSY/BIAS)                  權重20%
+// 每個指標回傳 -2~+2 分級訊號，回傳值為加權後的總分(約-2.0~+2.0)
 //====================================================================
 double SigStrength(double value, double strongHi, double mildHi, double mildLo, double strongLo)
 {
@@ -1107,6 +1208,7 @@ double ComputeWeighted11Score(const MqlRates &rates[], int copied, int shortPeri
    }
    int last=n-1;
 
+   // ---- 趨勢型 45% ----
    double maS = AvgArr(close,last,shortPeriod);
    double maL = AvgArr(close,last,longPeriod);
    double maDiffPct = (maL!=0)?(maS-maL)/maL*100.0:0;
@@ -1129,6 +1231,7 @@ double ComputeWeighted11Score(const MqlRates &rates[], int copied, int shortPeri
 
    double trendAvg = (sMA+sMACD+sBOLL+sKELT)/4.0;
 
+   // ---- 震盪型 35% ----
    double rsi = RSI_Arr(close,last,14);
    double sRSI = SigStrength(rsi, 60,50,50,40);
 
@@ -1146,6 +1249,7 @@ double ComputeWeighted11Score(const MqlRates &rates[], int copied, int shortPeri
 
    double momentumAvg = (sRSI+sKD+sWR+sCCI+sMTM)/5.0;
 
+   // ---- 其他 20% ----
    double psy = PSY_Arr(close,last,12);
    double sPSY = SigStrength(psy, 60,50,50,40);
 
@@ -1170,9 +1274,9 @@ string DetectCandlePattern(const MqlRates &rates[], int copied)
 {
    if(copied < 6) return "資料不足";
 
-   MqlRates c1 = rates[1];
-   MqlRates c2 = rates[2];
-   MqlRates c3 = rates[3];
+   MqlRates c1 = rates[1]; // 最新已收完(第3根)
+   MqlRates c2 = rates[2]; // 中間(第2根)
+   MqlRates c3 = rates[3]; // 最早(第1根)
 
    double body1 = MathAbs(c1.close - c1.open);
    double body2 = MathAbs(c2.close - c2.open);
@@ -1183,11 +1287,15 @@ string DetectCandlePattern(const MqlRates &rates[], int copied)
 
    double mid3 = (c3.open + c3.close) / 2.0;
 
+   // 晨星(看漲反轉，3根)：第1根長黑棒 → 第2根小實體(猶豫) → 第3根長紅棒收回第1根實體中點以上
    if(bear3 && body3 > 0 && body2 <= body3*0.35 && bull1 && c1.close > mid3)
       return "晨星(3根反轉)";
+
+   // 昏星(看跌反轉，3根)：第1根長紅棒 → 第2根小實體 → 第3根長黑棒收到第1根實體中點以下
    if(bull3 && body3 > 0 && body2 <= body3*0.35 && bear1 && c1.close < mid3)
       return "昏星(3根反轉)";
 
+   // 找不到3根排列時，退回2根/1根的備案判斷
    double range1 = c1.high - c1.low;
    if(range1 <= 0) return "無明顯型態";
 
@@ -1197,14 +1305,17 @@ string DetectCandlePattern(const MqlRates &rates[], int copied)
    bool bull2 = c2.close > c2.open;
    bool bear2 = c2.close < c2.open;
 
+   // 吞噬：目前這根實體完全包住前一根實體，且方向相反
    if(bear2 && bull1 && c1.open <= c2.close && c1.close >= c2.open)
       return "看漲吞噬";
    if(bull2 && bear1 && c1.open >= c2.close && c1.close <= c2.open)
       return "看跌吞噬";
 
+   // 十字星：實體極小(不到全距的10%)，判斷優先於針線
    if(body1 <= range1*0.1)
       return "十字星";
 
+   // 針線(Pin Bar)：長下影線+小實體在上緣=看漲；長上影線+小實體在下緣=看跌
    if(lowerWick1 >= body1*2.0 && lowerWick1 >= range1*0.5 && upperWick1 <= body1*0.5)
       return "看漲針線";
    if(upperWick1 >= body1*2.0 && upperWick1 >= range1*0.5 && lowerWick1 <= body1*0.5)
@@ -1213,6 +1324,11 @@ string DetectCandlePattern(const MqlRates &rates[], int copied)
    return "無明顯型態";
 }
 
+//====================================================================
+// 關鍵位判斷(分級版)：貼近任一關鍵位就算「普通信號」，
+// 如果貼近的那個位置又跟另一個關鍵位彼此重疊，升級為「強信號」
+// zoneOut 回傳 "支撐" 或 "壓力"，strengthOut 回傳 "強信號" 或 "普通信號"
+//====================================================================
 bool CheckKeyLevelConfluence(double bid,
                                double weekSup, double weekRes, double recSup, double recRes,
                                double asiaLow, double asiaHigh, double euroLow, double euroHigh,
@@ -1253,16 +1369,22 @@ bool CheckKeyLevelConfluence(double bid,
    return true;
 }
 
+
+//====================================================================
+// 純MA家族趨勢強度(第二層原始設計版)：只用短MA/長MA/EMA/交叉/斜度/排列/Bid位置，
+// 不含RSI/KD等11指標。黃金死亡交叉權重加倍，因為代表「趨勢即將發動」。
+// 回傳分數(-6~+6)，judgeOut回傳5級文字判定。
+//====================================================================
 double ComputeTrendStrengthMA(double bid, double shortMA, double ema, string crossState,
                                 double shortAngle, double emaSlopePct, string &judgeOut)
 {
    double s = 0;
-   s += (bid > shortMA) ? 1 : -1;
-   s += (shortMA > ema) ? 1 : -1;
-   if(crossState == "黃金交叉")      s += 2;
+   s += (bid > shortMA) ? 1 : -1;              // Bid相對短MA位置
+   s += (shortMA > ema) ? 1 : -1;              // 均線排列(短MA vs EMA)
+   if(crossState == "黃金交叉")      s += 2;    // 交叉權重加倍：趨勢即將發動
    else if(crossState == "死亡交叉") s -= 2;
-   s += (shortAngle > 0) ? 1 : -1;
-   s += (emaSlopePct > 0) ? 1 : -1;
+   s += (shortAngle > 0) ? 1 : -1;             // 短MA角度方向
+   s += (emaSlopePct > 0) ? 1 : -1;            // EMA角度方向
 
    if(s >= 4)       judgeOut = "強力多頭";
    else if(s >= 1)  judgeOut = "偏多";
@@ -1273,8 +1395,18 @@ double ComputeTrendStrengthMA(double bid, double shortMA, double ema, string cro
    return s;
 }
 
+
+//====================================================================
+// 雙路徑進場訊號偵測(純觀察用，畫在圖表上，不下單)
+// 路徑A(順勢拉回)：大格局站穩長隧道一側 + 價格拉回碰到短隧道範圍 + 短期動能反轉 + 帶量
+// 路徑B(轉折啟動)：過濾線帶量穿越長隧道(整組穿過，不是碰一下) + 長隧道本身轉為同向上揚/下彎
+//====================================================================
 datetime LastUnifiedCheckedBar = 0;
 
+//+------------------------------------------------------------------+
+//| 跟ExcelMonitor_TradingEA完全一致的方向計算(M5/M15/H1用Vegas路徑A/B，
+//| 另外+TAI(H1))，只算「最新已收完那根K棒」，回傳+1多/-1空/0無訊號     |
+//+------------------------------------------------------------------+
 int ComputeVegasDirectionForTF_Ind(string sym, ENUM_TIMEFRAMES period)
 {
    int longA=VegasLongAArr[ChartSymbolIdx], longB=VegasLongBArr[ChartSymbolIdx];
@@ -1342,6 +1474,9 @@ int ComputeVegasDirectionForTF_Ind(string sym, ENUM_TIMEFRAMES period)
    return 0;
 }
 
+//+------------------------------------------------------------------+
+//| TAI動能方向(跟EA的ComputeTAIDirectionForTF完全一致)，用H1當代表週期  |
+//+------------------------------------------------------------------+
 int TaiMomentumP[SYMBOL_COUNT], TaiMAP[SYMBOL_COUNT], TaiFilterP[SYMBOL_COUNT];
 
 void LoadTAIParams()
@@ -1405,10 +1540,10 @@ int ComputeTAIDirectionForTF_Ind(string sym, ENUM_TIMEFRAMES period)
 
    double fastAvg[];
    ArrayResize(fastAvg, copied);
-   int emaMASize = ArraySize(emaMA);
+   int emaMASize = ArraySize(emaMA); // CalcEMA回傳的大小其實是copied-1，不是copied，這裡取實際大小避免越界
    for(int i=0;i<copied-1;i++)
    {
-      int i1 = (i<emaMASize)   ? i   : emaMASize-1;
+      int i1 = (i<emaMASize)   ? i   : emaMASize-1;   // 索引超出emaMA實際大小時，夾住在最後一格
       int i2 = (i+1<emaMASize) ? i+1 : emaMASize-1;
       fastAvg[i] = emaMA[i1] + responseBoost*(emaMA[i1]-emaMA[i2]);
    }
@@ -1475,16 +1610,21 @@ int ComputeTAIDirectionForTF_Ind(string sym, ENUM_TIMEFRAMES period)
    return 0;
 }
 
+//+------------------------------------------------------------------+
+//| 跟EA完全一致的2/4投票判斷：M5+M15+H1(Vegas) + TAI(H1)，畫在圖表上   |
+//+------------------------------------------------------------------+
 void DetectVegasEntrySignals()
 {
    datetime curH1Bar = iTime(_Symbol, PERIOD_H1, 0);
-   if(curH1Bar == LastUnifiedCheckedBar) return;
+   if(curH1Bar == LastUnifiedCheckedBar) return; // H1還沒收出新K棒，不用重算(這套系統以H1步調為主)
    LastUnifiedCheckedBar = curH1Bar;
 
    int dirM5  = ComputeVegasDirectionForTF_Ind(_Symbol, PERIOD_M5);
    int dirM15 = ComputeVegasDirectionForTF_Ind(_Symbol, PERIOD_M15);
    int dirH1  = ComputeVegasDirectionForTF_Ind(_Symbol, PERIOD_H1);
    int dirTAI = ComputeTAIDirectionForTF_Ind(_Symbol, PERIOD_H1);
+   // 把TAI方向發布到全域變數，讓VolumePanel等其他指標可以讀取顯示(例如成交量柱狀圖變色)。
+   // 用「EMALL_TAI_+商品代碼」當變數名稱，不同商品各自獨立、不會互相蓋掉。
    GlobalVariableSet("EMALL_TAI_"+_Symbol, (double)dirTAI);
 
    int votesLong  = (dirM5==1?1:0)+(dirM15==1?1:0)+(dirH1==1?1:0)+(dirTAI==1?1:0);
@@ -1493,7 +1633,7 @@ void DetectVegasEntrySignals()
    int finalDir = 0;
    if(votesLong>=2) finalDir=1;
    else if(votesShort>=2) finalDir=-1;
-   if(finalDir==0) return;
+   if(finalDir==0) return; // 沒有湊到2/4，不畫箭頭(EA這輪也不會下單)
 
    MqlRates r0[];
    ArraySetAsSeries(r0, true);
@@ -1503,10 +1643,13 @@ void DetectVegasEntrySignals()
    DrawEntryMarker(r0[0].time, finalDir>0 ? r0[0].low : r0[0].high, finalDir>0, tag);
 }
 
+//+------------------------------------------------------------------+
+//| 在圖表上畫進場訊號箭頭+文字標記(用時間當物件名稱的一部分，避免重複畫)|
+//+------------------------------------------------------------------+
 void DrawEntryMarker(datetime t, double price, bool isBull, string voteTag)
 {
    string name = PFX + "Sig_" + IntegerToString((long)t) + "_" + (isBull?"B":"S");
-   if(ObjectFind(0, name) >= 0) return;
+   if(ObjectFind(0, name) >= 0) return; // 已經畫過這根K棒的訊號，不重複畫
 
    ObjectCreate(0, name, isBull ? OBJ_ARROW_UP : OBJ_ARROW_DOWN, 0, t, price);
    ObjectSetInteger(0, name, OBJPROP_COLOR, isBull ? clrLime : clrRed);
