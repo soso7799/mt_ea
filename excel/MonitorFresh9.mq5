@@ -23,7 +23,7 @@
 //| 供 Module1_v3.bas 的 ImportMT5Data() 讀取。                        |
 //+------------------------------------------------------------------+
 #property copyright "Custom"
-#property version   "9.10（全新檔名版+今日漲跌%合理性檢查）"
+#property version   "9.20（全新檔名版+今日漲跌%改用M5自算）"
 #property strict
 
 #ifndef M_PI
@@ -280,25 +280,32 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    double compositeScore = ComputeComposite11(rates, copied, compositeJudge);
 
    //---------------- 11. 今日開盤至現在漲跌% (欄36) ----------------
-   // 修正：之前用 iOpen(sym,PERIOD_D1,0) 這個「捷徑函式」直接讀，實測發現
-   // 對於非圖表本身的商品(甚至有時候連圖表本身的商品也一樣)，就算加了
-   // SERIES_SYNCHRONIZED 檢查，還是可能傳回錯誤/陳舊的K棒，算出離譜的
-   // 漲跌%(-58%、99%這種)。改用 CopyRates 明確要求終端機取得D1資料，
-   // 結果實測發現在某些環境下，即使是全新編譯的EA，CopyRates對非圖表
-   // 商品的D1資料還是可能傳回過期/錯誤的快取K棒(不會失敗、也不會回傳0，
-   // 只是open價格本身就是錯的)，單靠「有沒有抓到資料」判斷不出來。
-   // 因此再加一層「合理性檢查」當保險：外匯主要貨幣對/主要指數單日漲跌
-   // 正常不會超過±20%，算出來的百分比只要超過這個範圍，就直接視為資料
-   // 異常、回傳0，寧可留白也不要顯示一個看似合理、實際上是錯的離譜數字。
+   // 修正：iOpen(sym,PERIOD_D1,0)、CopyRates(sym,PERIOD_D1,...) 這兩種抓
+   // D1資料的方式，實測在這個環境下對非圖表商品都可能傳回過期/錯誤的
+   // 快取K棒(不會失敗、也不會回傳0，只是open價格本身就是錯的)。
+   // 改成完全不碰D1，直接用本函式最上面已經抓到、確定可靠的M5陣列
+   // (rates[]，週支撐/近支撐等其他欄位都是靠它算出來的，數值一直正常)，
+   // 自己往回找「今天第一根M5 K棒」的開盤價當作今日開盤價。
    double dailyOpen = 0;
    {
-      MqlRates dRates[];
-      ArraySetAsSeries(dRates, true);
-      int dCopied = CopyRates(sym, PERIOD_D1, 0, 2, dRates);
-      if(dCopied >= 1 && dRates[0].open > 0)
-         dailyOpen = dRates[0].open;
+      MqlDateTime dtNow;
+      TimeToStruct(rates[0].time, dtNow);
+      dtNow.hour=0; dtNow.min=0; dtNow.sec=0;
+      datetime todayStart = StructToTime(dtNow);
+      for(int i=copied-1;i>=0;i--)   // 從最舊的bar往新找，第一根落在今天範圍內的就是今日開盤
+      {
+         if(rates[i].time >= todayStart)
+         {
+            dailyOpen = rates[i].open;
+            break;
+         }
+      }
    }
-   double todayChangePct = (dailyOpen != 0) ? (bid - dailyOpen) / dailyOpen * 100.0 : 0;
+   double todayChangePct = (dailyOpen > 0) ? (bid - dailyOpen) / dailyOpen * 100.0 : 0;
+   // 保留合理性檢查當最後一道保險：外匯主要貨幣對/主要指數單日漲跌正常
+   // 不會超過±20%，超過就視為資料異常、回傳0，不要顯示離譜數字。
+   if(MathAbs(todayChangePct) > 20.0)
+      todayChangePct = 0;
    if(MathAbs(todayChangePct) > 20.0)
       todayChangePct = 0;
 
