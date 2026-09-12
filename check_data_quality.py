@@ -53,7 +53,10 @@ def load_csv(path: str) -> pd.DataFrame:
     return df
 
 
-def check_file(path: str, symbol: str, tf: str) -> dict:
+def check_file(path: str, symbol: str, tf: str):
+    """回傳 (result_dict, gap_segments_list)。gap_segments_list 是這個檔案裡每一段
+    「可疑缺漏」的明確起訖時間，直接可以拿去當作「該重新下載哪一段」的清單，
+    不用自己再回頭肉眼比對。"""
     result = {
         "file": os.path.basename(path),
         "symbol": symbol,
@@ -70,13 +73,14 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
         "notes_gap_detail": "",
         "notes": "",
     }
+    gap_segments = []
 
     df = load_csv(path)
     required = {"date", "open", "high", "low", "close", "volume"}
     if not required.issubset(df.columns):
         result["status"] = "FAIL"
         result["notes"] = f"欄位不符預期，實際欄位: {list(df.columns)}"
-        return result
+        return result, gap_segments
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     bad_dates = df["date"].isna().sum()
@@ -91,7 +95,7 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
     if len(df) == 0:
         result["status"] = "FAIL"
         result["notes"] = "資料筆數為0"
-        return result
+        return result, gap_segments
 
     result["date_start"] = str(df["date"].iloc[0])
     result["date_end"] = str(df["date"].iloc[-1])
@@ -113,19 +117,27 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
         # 假日(聖誕/元旦/國定假日等)常常從週三~週五就開始收假，一路連到隔週一/二才開盤，
         # 這種長間隔完全正常，不該被當成資料缺漏——不管缺口是從星期幾開始，只要總長度在
         # 「一般連續假期」的合理範圍內(最多HOLIDAY_GAP_DAYS天)，就不算可疑。
-        # 只有超過這個天數的缺口(通常代表商品中途換過代碼、資料庫本身有洞)才會被列為可疑。
+        # 只有超過這個天數的缺口(通常代表商品中途換過代碼、資料庫本身有洞)才會被列為可疑，
+        # 每一段可疑缺口都記下確切的起訖時間，存進gap_segments給merge_csv_segments.py用。
         HOLIDAY_GAP_DAYS = 5
         suspicious = 0
         max_gap = 0.0
         biggest_suspicious_gap = 0.0
         for i in range(1, len(df)):
-            gap = (df["date"].iloc[i] - df["date"].iloc[i - 1]).total_seconds() / 60.0
+            t_prev = df["date"].iloc[i - 1]
+            t_cur = df["date"].iloc[i]
+            gap = (t_cur - t_prev).total_seconds() / 60.0
             if gap > max_gap:
                 max_gap = gap
             if gap > expected_gap * 20 and gap > HOLIDAY_GAP_DAYS * 24 * 60:
                 suspicious += 1
                 if gap > biggest_suspicious_gap:
                     biggest_suspicious_gap = gap
+                gap_segments.append({
+                    "symbol": symbol, "tf": tf,
+                    "gap_start": str(t_prev), "gap_end": str(t_cur),
+                    "gap_days": round(gap / 1440.0, 2),
+                })
         result["missing_bars_estimate"] = suspicious
         result["biggest_gap"] = f"{max_gap:.0f}分鐘"
         if suspicious > 0:
@@ -139,7 +151,8 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
     if viol > 0:
         problems.append(f"{viol}筆OHLC邏輯錯誤(high/low不合理)")
     if result["missing_bars_estimate"] > 0:
-        problems.append(f"疑似{result['missing_bars_estimate']}處異常缺漏({result['notes_gap_detail']})")
+        problems.append(f"疑似{result['missing_bars_estimate']}處異常缺漏({result['notes_gap_detail']})，"
+                         f"詳細起訖時間見GapSegments.csv")
     if bad_dates > 0:
         problems.append(f"{bad_dates}筆日期欄位解析失敗")
     if result["rows"] < 300:
@@ -149,7 +162,7 @@ def check_file(path: str, symbol: str, tf: str) -> dict:
         result["status"] = "警告"
         result["notes"] = "；".join(problems)
 
-    return result
+    return result, gap_segments
 
 
 def main():
@@ -166,6 +179,7 @@ def main():
     name_re = re.compile(r"^(.*?)_(M5|M15|H1|H4|D1)_ALL_DATA_.*\.csv$", re.IGNORECASE)
 
     rows = []
+    all_gap_segments = []
     for path in files:
         base = os.path.basename(path)
         m = name_re.match(base)
@@ -173,7 +187,9 @@ def main():
             print(f"  [跳過，檔名格式看不懂] {base}")
             continue
         symbol, tf = m.group(1), m.group(2).upper()
-        rows.append(check_file(path, symbol, tf))
+        result, gap_segments = check_file(path, symbol, tf)
+        rows.append(result)
+        all_gap_segments.extend(gap_segments)
 
     report = pd.DataFrame(rows)
     out_path = os.path.join(args.data_dir, "DataQualityReport.csv")
@@ -191,6 +207,12 @@ def main():
             print(f"  [{r['status']}] {r['symbol']} {r['tf']}: {r['notes']}")
     else:
         print("全部檔案都正常，可以直接拿去跑 vegas_backtest_optimizer.py 了。")
+
+    if all_gap_segments:
+        gap_path = os.path.join(args.data_dir, "GapSegments.csv")
+        pd.DataFrame(all_gap_segments).to_csv(gap_path, index=False, encoding="utf-8-sig")
+        print(f"\n找到 {len(all_gap_segments)} 段可疑缺口，確切起訖時間已存到：{gap_path}")
+        print("這份清單就是「該去補抓哪一段」的依據——每一列都是 (商品,週期,缺口開始,缺口結束,缺口天數)。")
 
 
 if __name__ == "__main__":
