@@ -279,13 +279,20 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    double compositeScore = ComputeComposite11(rates, copied, compositeJudge);
 
    //---------------- 11. 今日開盤至現在漲跌% (欄36) ----------------
-   // 修正：OnInit() 會在 EA 剛啟動時就馬上呼叫一次 WriteAllRows()，這時候
-   // 終端機通常還沒把該商品的D1(日線)歷史資料同步完成，iOpen() 在資料還沒
-   // 同步好之前可能會拿到不完整/錯誤的K棒，算出來的漲跌%就會離譜地大
-   // (例如 -58%、99% 這種不合理的單日漲跌)。加上 SERIES_SYNCHRONIZED 檢查，
-   // 資料還沒同步好之前先回傳0，等下一次(每UpdateSeconds秒)更新時通常就正常了。
-   bool d1Ready = (Bars(sym, PERIOD_D1) >= 2) && SeriesInfoInteger(sym, PERIOD_D1, SERIES_SYNCHRONIZED);
-   double dailyOpen = d1Ready ? iOpen(sym, PERIOD_D1, 0) : 0;
+   // 修正：之前用 iOpen(sym,PERIOD_D1,0) 這個「捷徑函式」直接讀，實測發現
+   // 對於非圖表本身的商品(甚至有時候連圖表本身的商品也一樣)，就算加了
+   // SERIES_SYNCHRONIZED 檢查，還是可能傳回錯誤/陳舊的K棒，算出離譜的
+   // 漲跌%(-58%、99%這種)。改成跟 GetWeekRange() 同樣做法：用 CopyRates
+   // 明確要求終端機取得D1資料(會主動觸發下載，不像iOpen只是被動讀快取)，
+   // 拿不到有效資料就直接回傳0，不要用可疑的數字。
+   double dailyOpen = 0;
+   {
+      MqlRates dRates[];
+      ArraySetAsSeries(dRates, true);
+      int dCopied = CopyRates(sym, PERIOD_D1, 0, 2, dRates);
+      if(dCopied >= 1 && dRates[0].open > 0)
+         dailyOpen = dRates[0].open;
+   }
    double todayChangePct = (dailyOpen != 0) ? (bid - dailyOpen) / dailyOpen * 100.0 : 0;
 
    //---------------- 12. 歐亞美盤高低點：用量能判斷是否會突破 (欄38~39，新增) ----------------
