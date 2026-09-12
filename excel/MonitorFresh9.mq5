@@ -23,7 +23,7 @@
 //| 供 Module1_v3.bas 的 ImportMT5Data() 讀取。                        |
 //+------------------------------------------------------------------+
 #property copyright "Custom"
-#property version   "9.00（全新檔名版，避免與舊檔案混淆）"
+#property version   "9.10（全新檔名版+今日漲跌%合理性檢查）"
 #property strict
 
 #ifndef M_PI
@@ -283,9 +283,13 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    // 修正：之前用 iOpen(sym,PERIOD_D1,0) 這個「捷徑函式」直接讀，實測發現
    // 對於非圖表本身的商品(甚至有時候連圖表本身的商品也一樣)，就算加了
    // SERIES_SYNCHRONIZED 檢查，還是可能傳回錯誤/陳舊的K棒，算出離譜的
-   // 漲跌%(-58%、99%這種)。改成跟 GetWeekRange() 同樣做法：用 CopyRates
-   // 明確要求終端機取得D1資料(會主動觸發下載，不像iOpen只是被動讀快取)，
-   // 拿不到有效資料就直接回傳0，不要用可疑的數字。
+   // 漲跌%(-58%、99%這種)。改用 CopyRates 明確要求終端機取得D1資料，
+   // 結果實測發現在某些環境下，即使是全新編譯的EA，CopyRates對非圖表
+   // 商品的D1資料還是可能傳回過期/錯誤的快取K棒(不會失敗、也不會回傳0，
+   // 只是open價格本身就是錯的)，單靠「有沒有抓到資料」判斷不出來。
+   // 因此再加一層「合理性檢查」當保險：外匯主要貨幣對/主要指數單日漲跌
+   // 正常不會超過±20%，算出來的百分比只要超過這個範圍，就直接視為資料
+   // 異常、回傳0，寧可留白也不要顯示一個看似合理、實際上是錯的離譜數字。
    double dailyOpen = 0;
    {
       MqlRates dRates[];
@@ -295,6 +299,8 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
          dailyOpen = dRates[0].open;
    }
    double todayChangePct = (dailyOpen != 0) ? (bid - dailyOpen) / dailyOpen * 100.0 : 0;
+   if(MathAbs(todayChangePct) > 20.0)
+      todayChangePct = 0;
 
    //---------------- 12. 歐亞美盤高低點：用量能判斷是否會突破 (欄38~39，新增) ----------------
    string sessionLevelTest="", sessionBreakoutJudge="";

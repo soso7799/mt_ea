@@ -99,15 +99,16 @@ void WriteAllRows()
       return;
    }
 
-   // 標題列(36欄，僅供人工檢視用，VBA匯入時會跳過這一行)
+   // 標題列(39欄，僅供人工檢視用，VBA匯入時會跳過這一行)
+   // v9：TodayChangePct 移到 Bid 後面(第3欄)，方便一眼看到現價+今日漲跌%
    FileWrite(handle,
-      "Symbol","Bid","AsiaLow","AsiaHigh","EuropeLow","EuropeHigh","USLow","USHigh",
+      "Symbol","Bid","TodayChangePct","AsiaLow","AsiaHigh","EuropeLow","EuropeHigh","USLow","USHigh",
       "WeekSupport","WeekResistance","RecentSupport","RecentResistance",
       "SupportTouch","ResistanceTouch","SupportValid","ResistanceValid",
       "ShortMA","LongMA","EMA","ShortMASlopePct","LongMASlopePct","EMASlopePct",
       "MAAlignment","CrossState","TrendScore","TrendJudgment","PersonalSL_ATR",
       "CurrentVolume","AverageVolume","VolumeState","FinalSignal",
-      "CandlePattern","EntrySignal","CompositeScore","CompositeJudgment","UpdateTime","TodayChangePct",
+      "CandlePattern","EntrySignal","CompositeScore","CompositeJudgment","UpdateTime",
       "SessionLevelTest","SessionBreakoutJudge");
 
    for(int i=0;i<SYMBOL_COUNT;i++)
@@ -133,11 +134,11 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    int copied = CopyRates(sym, PERIOD_M5, 0, needBars, rates);
    if(copied < longPeriod+SlopeLookback+2)
    {
-      // 資料不足也要寫滿37欄，避免VBA那邊又出現「欄位不足」錯誤
-      FileWrite(handle, sym,0,0,0,0,0,0,0,0,0,0,0,0,0,"待確認","待確認",
+      // 資料不足也要寫滿39欄，避免VBA那邊又出現「欄位不足」錯誤
+      FileWrite(handle, sym,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"待確認","待確認",
                  0,0,0,0,0,0,"資料不足","資料不足",0,"資料不足",0,0,0,"正常",
                  "資料不足","資料不足","資料不足",0,"資料不足",
-                 TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), 0,
+                 TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
                  "","資料不足");
       return;
    }
@@ -282,9 +283,13 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    // 修正：之前用 iOpen(sym,PERIOD_D1,0) 這個「捷徑函式」直接讀，實測發現
    // 對於非圖表本身的商品(甚至有時候連圖表本身的商品也一樣)，就算加了
    // SERIES_SYNCHRONIZED 檢查，還是可能傳回錯誤/陳舊的K棒，算出離譜的
-   // 漲跌%(-58%、99%這種)。改成跟 GetWeekRange() 同樣做法：用 CopyRates
-   // 明確要求終端機取得D1資料(會主動觸發下載，不像iOpen只是被動讀快取)，
-   // 拿不到有效資料就直接回傳0，不要用可疑的數字。
+   // 漲跌%(-58%、99%這種)。改用 CopyRates 明確要求終端機取得D1資料，
+   // 結果實測發現在某些環境下，即使是全新編譯的EA，CopyRates對非圖表
+   // 商品的D1資料還是可能傳回過期/錯誤的快取K棒(不會失敗、也不會回傳0，
+   // 只是open價格本身就是錯的)，單靠「有沒有抓到資料」判斷不出來。
+   // 因此再加一層「合理性檢查」當保險：外匯主要貨幣對/主要指數單日漲跌
+   // 正常不會超過±20%，算出來的百分比只要超過這個範圍，就直接視為資料
+   // 異常、回傳0，寧可留白也不要顯示一個看似合理、實際上是錯的離譜數字。
    double dailyOpen = 0;
    {
       MqlRates dRates[];
@@ -294,6 +299,8 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
          dailyOpen = dRates[0].open;
    }
    double todayChangePct = (dailyOpen != 0) ? (bid - dailyOpen) / dailyOpen * 100.0 : 0;
+   if(MathAbs(todayChangePct) > 20.0)
+      todayChangePct = 0;
 
    //---------------- 12. 歐亞美盤高低點：用量能判斷是否會突破 (欄38~39，新增) ----------------
    string sessionLevelTest="", sessionBreakoutJudge="";
@@ -302,14 +309,14 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
 
    //---------------- 寫入一行 ----------------
    FileWrite(handle,
-      sym, bid, asiaLow, asiaHigh, euroLow, euroHigh, usLow, usHigh,
+      sym, bid, todayChangePct, asiaLow, asiaHigh, euroLow, euroHigh, usLow, usHigh,
       weekSupport, weekResistance, recentSupport, recentResistance,
       supportTouch, resistanceTouch, supportValid, resistanceValid,
       shortMA_now, longMA_now, ema_now, shortSlopePct, longSlopePct, emaSlopePct,
       maAlign, crossState, trendScore, trendJudge, personalSL,
       curVol, avgVol, volState, finalSignal,
       candlePattern, entrySignal, compositeScore, compositeJudge,
-      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), todayChangePct,
+      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
       sessionLevelTest, sessionBreakoutJudge);
 }
 
