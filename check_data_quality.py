@@ -27,6 +27,14 @@ EXPECTED_GAP_MINUTES = {
     "M5": 5, "M15": 15, "H1": 60, "H4": 240, "D1": 1440,
 }
 
+# 「最近recent_days天」夠不夠拿去做參數優化的最低根數門檻，依週期而定——
+# D1一年最多就是交易日數(約252~261根)，用跟其他週期一樣的300根門檻反而
+# 會讓每一份D1都被誤判成「不夠」，所以D1另外給一個符合其自然根數的門檻。
+MIN_RECENT_ROWS = {
+    "D1": 200,
+}
+DEFAULT_MIN_RECENT_ROWS = 300
+
 
 def load_csv(path: str) -> pd.DataFrame:
     try:
@@ -189,8 +197,9 @@ def check_file(path: str, symbol: str, tf: str, recent_days: int = 365):
     result["recent_rows"] = len(recent_df)
 
     recent_problems = []
-    if len(recent_df) < 300:
-        recent_problems.append(f"最近{recent_days}天只有{len(recent_df)}根，可能不夠拿去做參數優化")
+    min_recent_rows = MIN_RECENT_ROWS.get(tf, DEFAULT_MIN_RECENT_ROWS)
+    if len(recent_df) < min_recent_rows:
+        recent_problems.append(f"最近{recent_days}天只有{len(recent_df)}根，可能不夠拿去做參數優化(該週期建議至少{min_recent_rows}根以上)")
 
     recent_dup = int(recent_df["date"].duplicated().sum()) if len(recent_df) > 0 else 0
     if recent_dup > 0:
