@@ -306,8 +306,6 @@ void WriteSymbolRow(int handle, string sym, int shortPeriod, int longPeriod)
    // 不會超過±20%，超過就視為資料異常、回傳0，不要顯示離譜數字。
    if(MathAbs(todayChangePct) > 20.0)
       todayChangePct = 0;
-   if(MathAbs(todayChangePct) > 20.0)
-      todayChangePct = 0;
 
    //---------------- 12. 歐亞美盤高低點：用量能判斷是否會突破 (欄38~39，新增) ----------------
    string sessionLevelTest="", sessionBreakoutJudge="";
