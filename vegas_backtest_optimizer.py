@@ -724,6 +724,8 @@ def main():
     all_results = []
     winners_filter = []
     winners_dualpath = []
+    skipped_no_file = []      # 真的找不到CSV檔案、或根數太少
+    skipped_no_signal = []    # 有讀到檔案，但零訊號或訊號不夠可信
 
     for symbol in symbols:
         for tf in timeframes:
@@ -731,6 +733,7 @@ def main():
             df = load_symbol_tf_csv(args.data_dir, symbol, tf)
             if df is None or len(df) < 300:
                 print(f"  跳過：找不到資料或資料筆數太少(需要至少300根，目前{0 if df is None else len(df)}根)")
+                skipped_no_file.append(f"{symbol} {tf}")
                 continue
 
             if args.max_bars > 0 and len(df) > args.max_bars:
@@ -740,6 +743,7 @@ def main():
             result_df = optimize_symbol_tf(df, symbol, tf, mode=args.mode)
             if result_df.empty:
                 print("  跳過：所有參數組合都湊不到足夠的交易筆數")
+                skipped_no_signal.append(f"{symbol} {tf}")
                 continue
 
             all_results.append(result_df)
@@ -760,6 +764,7 @@ def main():
                       f"輸入參數/經典預設值(效果跟寫入預設值一樣，但不會誤導成「已套用最佳化」)。"
                       f"完整測試明細仍會留在VegasBacktestSummary.csv。"
                       f"想解決可以加大 --max-bars，或這個週期先不要拿去用優化結果。")
+                skipped_no_signal.append(f"{symbol} {tf}")
                 continue
 
             best = result_df.iloc[0]
@@ -781,7 +786,13 @@ def main():
             })
 
     if not all_results:
-        print("沒有任何(Symbol,TF)成功跑出結果，請確認 --data-dir 底下真的有 Data Console 匯出的CSV。")
+        print("沒有任何(Symbol,TF)成功跑出結果。")
+        if skipped_no_file:
+            print(f"  其中 {len(skipped_no_file)} 組是真的找不到CSV檔案(或根數<300)，"
+                  f"請確認 --data-dir 底下有沒有對應檔案：{', '.join(skipped_no_file)}")
+        if skipped_no_signal:
+            print(f"  其中 {len(skipped_no_signal)} 組是有讀到檔案，但湊不到足夠可信的交易筆數"
+                  f"(不是找不到檔案的問題，看上面每組的[診斷]那行找原因)：{', '.join(skipped_no_signal)}")
         sys.exit(1)
 
     summary_path = os.path.join(args.out_dir, "VegasBacktestSummary.csv")
@@ -795,6 +806,13 @@ def main():
     dualpath_path = os.path.join(args.out_dir, "VegasDualPathParams.csv")
     pd.DataFrame(winners_dualpath).to_csv(dualpath_path, index=False, encoding="utf-8-sig")
     print(f"贏家參數(雙路徑訊號)  -> {dualpath_path}")
+
+    if skipped_no_file:
+        print(f"\n[提醒] {len(skipped_no_file)} 組真的找不到CSV檔案(或根數<300)，"
+              f"不在上面任何檔案裡：{', '.join(skipped_no_file)}")
+    if skipped_no_signal:
+        print(f"[提醒] {len(skipped_no_signal)} 組有讀到檔案但不可信/零訊號，"
+              f"故意沒寫進贏家清單(EA會用預設值)：{', '.join(skipped_no_signal)}")
 
     print("\n下一步：把 VegasFilterParams.csv 跟 VegasDualPathParams.csv 複製到\n"
           "  %APPDATA%\\MetaQuotes\\Terminal\\Common\\Files\\\n"
