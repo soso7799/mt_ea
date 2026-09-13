@@ -275,9 +275,14 @@ def precompute_indicator_cache(close: np.ndarray, volume: np.ndarray):
 
 
 def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasParams,
-                              ema_cache: dict, hma_cache: dict, vol_avg_cache: dict) -> np.ndarray:
+                              ema_cache: dict, hma_cache: dict, vol_avg_cache: dict,
+                              debug: bool = False):
     """回傳跟close等長的方向陣列：+1多／-1空／0無訊號，每個k代表「收在k那根K棒時」的訊號。
-    EMA/HullMA/成交量均量都是從預先算好的cache查表，這個函式本身只做逐K棒的訊號判斷。"""
+    EMA/HullMA/成交量均量都是從預先算好的cache查表，這個函式本身只做逐K棒的訊號判斷。
+
+    debug=True時額外回傳一個dict，記錄每個中間條件各自成立幾次——用來在「完全零訊號」
+    時直接看出是卡在哪一關(通常是vol_ok帶量門檻，不同商品的成交量欄位量級/波動性
+    差異很大，同一組VolThreshold不見得每個商品都適用)，不用再靠人工複製console文字。"""
     n = len(close)
 
     ema_la = ema_cache[p.long_a]
@@ -288,6 +293,14 @@ def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasPara
     vol_avg = vol_avg_cache[p.vol_avg_bars]
 
     directions = np.zeros(n, dtype=int)
+    counts = None
+    if debug:
+        counts = {
+            "evaluated": 0, "vol_ok": 0, "touched_short": 0,
+            "bounce_up": 0, "bounce_down": 0, "cross_up": 0, "cross_down": 0,
+            "slope_up": 0, "slope_down": 0,
+            "path_a_bull": 0, "path_a_bear": 0, "path_b_bull": 0, "path_b_bear": 0,
+        }
 
     warmup = max(p.long_a, p.long_b, p.filter_p + max(1, round(math.sqrt(p.filter_p))),
                  p.vol_avg_bars) + p.slope_lookback + 3
@@ -296,6 +309,8 @@ def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasPara
             continue
         if np.isnan(ema_la[k]) or np.isnan(ema_lb[k]) or np.isnan(ema_sa[k]) or np.isnan(ema_sb[k]) or np.isnan(ema_f[k]):
             continue
+        if debug:
+            counts["evaluated"] += 1
 
         long_upper_now = max(ema_la[k], ema_lb[k])
         long_lower_now = min(ema_la[k], ema_lb[k])
@@ -304,6 +319,8 @@ def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasPara
 
         avg_vol = vol_avg[k]
         vol_ok = avg_vol > 0 and volume[k] > avg_vol * p.vol_threshold
+        if debug and vol_ok:
+            counts["vol_ok"] += 1
 
         long_upper_old = max(ema_la[k - p.slope_lookback], ema_lb[k - p.slope_lookback])
         long_lower_old = min(ema_la[k - p.slope_lookback], ema_lb[k - p.slope_lookback])
@@ -314,6 +331,11 @@ def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasPara
         tunnel_slope_down = (long_upper_now - long_upper_old < 0) and (long_lower_now - long_lower_old < 0)
         path_b_bull = cross_up and tunnel_slope_up and vol_ok
         path_b_bear = cross_down and tunnel_slope_down and vol_ok
+        if debug:
+            if cross_up: counts["cross_up"] += 1
+            if cross_down: counts["cross_down"] += 1
+            if tunnel_slope_up: counts["slope_up"] += 1
+            if tunnel_slope_down: counts["slope_down"] += 1
 
         close_k = close[k]
         long_bull_est = close_k > long_upper_now
@@ -329,9 +351,14 @@ def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasPara
             if sl <= c <= su:
                 touched_short = True
                 break
+        if debug and touched_short:
+            counts["touched_short"] += 1
 
         bounce_up = k >= 2 and (close[k] > close[k - 1]) and (close[k - 1] <= close[k - 2])
         bounce_down = k >= 2 and (close[k] < close[k - 1]) and (close[k - 1] >= close[k - 2])
+        if debug:
+            if bounce_up: counts["bounce_up"] += 1
+            if bounce_down: counts["bounce_down"] += 1
         path_a_bull = long_bull_est and touched_short and bounce_up and vol_ok
         path_a_bear = long_bear_est and touched_short and bounce_down and vol_ok
 
@@ -340,7 +367,37 @@ def compute_vegas_directions(close: np.ndarray, volume: np.ndarray, p: VegasPara
         elif path_a_bear or path_b_bear:
             directions[k] = -1
 
+        if debug:
+            if path_a_bull: counts["path_a_bull"] += 1
+            if path_a_bear: counts["path_a_bear"] += 1
+            if path_b_bull: counts["path_b_bull"] += 1
+            if path_b_bear: counts["path_b_bear"] += 1
+
+    if debug:
+        return directions, counts
     return directions
+
+
+def print_signal_diagnostics(close: np.ndarray, volume: np.ndarray, symbol: str, tf: str,
+                              ema_cache: dict, hma_cache: dict, vol_avg_cache: dict) -> None:
+    """用經典預設參數(144/169/34/55/100/1.2/20/5)快速跑一次，印出各中間條件各自成立
+    幾次——不管最後搜尋結果好不好，這行永遠都會印，這樣「完全零訊號」的商品不用
+    再靠人工複製console文字才能抓出問題卡在哪一步(通常是vol_ok帶量門檻，不同商品
+    的成交量量級/波動性差很多，同一組VolThreshold不見得每個商品都適用)。"""
+    default_p = VegasParams(DEFAULT_LONG_A, DEFAULT_LONG_B, DEFAULT_SHORT_A, DEFAULT_SHORT_B,
+                             DEFAULT_FILTER, DEFAULT_VOL_THRESHOLD, DEFAULT_VOL_AVG_BARS,
+                             DEFAULT_SLOPE_LOOKBACK)
+    _, c = compute_vegas_directions(close, volume, default_p, ema_cache, hma_cache, vol_avg_cache, debug=True)
+    print(f"  {symbol} {tf}: [診斷/經典預設參數] 有效K棒{c['evaluated']}根 | "
+          f"帶量條件成立{c['vol_ok']}次 | 短隧道觸碰{c['touched_short']}次 | "
+          f"反彈(多/空)={c['bounce_up']}/{c['bounce_down']} | "
+          f"過濾線穿越(多/空)={c['cross_up']}/{c['cross_down']} | "
+          f"長隧道斜率(上/下)={c['slope_up']}/{c['slope_down']} | "
+          f"路徑A訊號(多/空)={c['path_a_bull']}/{c['path_a_bear']} | "
+          f"路徑B訊號(多/空)={c['path_b_bull']}/{c['path_b_bear']}")
+    if c["evaluated"] > 0 and c["vol_ok"] == 0:
+        print(f"  {symbol} {tf}: >>> 帶量條件(vol_ok)一次都沒成立過，這就是零訊號的root cause，"
+              f"這個商品的成交量欄位量級/波動性可能跟FX對差很多，VolThreshold=1.2對它太嚴。")
 
 
 # =====================================================================
@@ -497,6 +554,7 @@ def optimize_symbol_tf_greedy(df: pd.DataFrame, symbol: str, tf: str) -> pd.Data
     precompute_start = time.time()
     ema_cache, hma_cache, vol_avg_cache = precompute_indicator_cache(close, volume)
     print(f"  {symbol} {tf}: 預先計算完成，花了{time.time()-precompute_start:.1f}秒")
+    print_signal_diagnostics(close, volume, symbol, tf, ema_cache, hma_cache, vol_avg_cache)
 
     rows = []
 
@@ -583,6 +641,7 @@ def optimize_symbol_tf_full(df: pd.DataFrame, symbol: str, tf: str) -> pd.DataFr
     precompute_start = time.time()
     ema_cache, hma_cache, vol_avg_cache = precompute_indicator_cache(close, volume)
     print(f"  {symbol} {tf}: 預先計算完成，花了{time.time()-precompute_start:.1f}秒")
+    print_signal_diagnostics(close, volume, symbol, tf, ema_cache, hma_cache, vol_avg_cache)
 
     rows = []
     tunnel_combos = [
