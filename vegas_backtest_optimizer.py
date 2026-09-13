@@ -684,6 +684,25 @@ def main():
                 continue
 
             all_results.append(result_df)
+
+            # 注意：如果這個(symbol,tf)裡「每一組」參數組合的交易筆數都不到
+            # score_combo()要求的最低門檻(15筆)，score會全部並列-999.0。
+            # 這種情況下用sort_values(...).iloc[0]去挑「贏家」其實是在一堆
+            # 並列的分數裡隨便挑一個(pandas排序在同分時的順序不保證跟評估順序
+            # 一致)，看起來像是選出了「不一樣的參數」，但其實只是隨機的平手結果，
+            # 完全沒有回測意義。這種情況改成明確保留EA本身的預設值，並且清楚
+            # 標記這組(symbol,tf)不可靠，而不是悄悄輸出一組沒有意義的「贏家」。
+            reliable = bool(result_df["score"].max() > -999.0)
+            if not reliable:
+                max_trades = int(result_df[["atr_trades", "sig_trades"]].to_numpy().max())
+                print(f"  [不可靠，跳過寫入贏家清單] 這個週期資料量下，所有參數組合最多只湊到"
+                      f"{max_trades}筆交易(需要至少15筆才能拿分數比較)，無法可靠判斷哪組參數比較好。"
+                      f"不寫進VegasFilterParams.csv/VegasDualPathParams.csv，EA會自動fallback用"
+                      f"輸入參數/經典預設值(效果跟寫入預設值一樣，但不會誤導成「已套用最佳化」)。"
+                      f"完整測試明細仍會留在VegasBacktestSummary.csv。"
+                      f"想解決可以加大 --max-bars，或這個週期先不要拿去用優化結果。")
+                continue
+
             best = result_df.iloc[0]
             print(f"  最佳組合 score={best['score']:.3f}  "
                   f"ATR版勝率={best['atr_win_rate']:.1%}(n={best['atr_trades']})  "
