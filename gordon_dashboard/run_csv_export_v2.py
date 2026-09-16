@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-RunDashboardUpdate.py
+run_csv_export_v2.py
 
 給 Gordon_FTMO_監控儀表板.xlsm 用的「一鍵更新」入口，取代分別執行
-gordon_analysis_engine_v1.py 跟 gordon_levels_module_v1.py 兩次。
+data_sheet_v2.py 跟 levels_sheet_v2.py 兩次。
 
 【為什麼要這支：解決MT5自動斷線退出的問題】
-gordon_analysis_engine_v1.py 跟 gordon_levels_module_v1.py 各自獨立呼叫
+data_sheet_v2.py 跟 levels_sheet_v2.py 各自獨立呼叫
 mt5.initialize()/mt5.shutdown()。如果照順序分開執行兩支，等於連續做兩次
 「連線→拉資料→斷線」，同一顆商品/週期的報價也重複抓了兩遍。這支把兩邊合併成
 一次 mt5.initialize()，跑完兩份分析、兩個CSV都寫完才 mt5.shutdown()，全程只
@@ -15,7 +15,7 @@ mt5.initialize()/mt5.shutdown()。如果照順序分開執行兩支，等於連�
 【執行順序 - 直接照這3步做】
 1. 打開 MT5 終端機，確認已登入你的 FTMO 帳號、圖表可以正常跳動報價。
 2. 在這個資料夾底下執行：
-       python RunDashboardUpdate.py
+       python run_csv_export_v2.py
    跑完會同時產生：
        D:\\GordonExchange\\AnalysisResults.csv
        D:\\GordonExchange\\LevelsResults.csv
@@ -32,9 +32,9 @@ import sys
 import pandas as pd
 import MetaTrader5 as mt5
 
-import gordon_full_analysis as gfa
-import gordon_analysis_engine_v1 as engine
-import gordon_levels_module_v1 as levels
+import analysis_core_v2 as gfa
+import data_sheet_v2 as engine
+import levels_sheet_v2 as levels
 
 
 def main():

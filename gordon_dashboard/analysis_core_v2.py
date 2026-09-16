@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-gordon_full_analysis.py
+analysis_core_v2.py
 
 全新、自成一體的分析腳本，直接讀取 GDH_ExportCSV 匯出到
 D:\\資料查詢\\ExportCSV\\ 的 12商品 × 多週期 歷史 CSV 檔案，完成：
@@ -19,7 +19,7 @@ D:\\資料查詢\\ExportCSV\\ 的 12商品 × 多週期 歷史 CSV 檔案，完�
  - HedgePairs.csv 前3組配對相關性+建議手數比例
  - AllSymbols_DashboardParams.csv 儀表板總表23欄參數
 
-執行方式：直接 python gordon_full_analysis.py，不需要任何命令列參數，
+執行方式：直接 python analysis_core_v2.py，不需要任何命令列參數，
 會自動掃描 ExportCSV 資料夾裡每個商品每個週期「最新」的那一份檔案。
 
 【SYMBOLS 清單說明 - 修正記錄】

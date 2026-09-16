@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-gordon_analysis_engine_v1.py
+data_sheet_v2.py
 
 給 Gordon_FTMO_監控儀表板.xlsm 的「Data」分頁用。
 
-這支不是另外發明的新邏輯 —— 直接重用同資料夾裡 gordon_full_analysis.py
+這支不是另外發明的新邏輯 —— 直接重用同資料夾裡 analysis_core_v2.py
 (你 Google 雲端硬碟裡真實在跑、有真實輸出資料驗證過的分析引擎)裡的指標計算
 (ATR/RSI/MACD)、訊號判斷(compute_votes_latest 三層合成訊號)、ATR動態SL/TP邏輯
 (ATR_SL_MULT/ATR_TP_MULT)，只是換一種輸出格式，貼進 Data 分頁。商品/週期跟
-gordon_full_analysis.py 完全一致：12商品、D1/H4/H1/M15/M5共5週期，12x5=60列，
+analysis_core_v2.py 完全一致：12商品、D1/H4/H1/M15/M5共5週期，12x5=60列，
 跟「說明」分頁描述的一致。
 
 32欄的欄名是我設計的(你先前答覆「沒有現成標題」)，但每一欄的數值都是直接呼叫
-gordon_full_analysis.py 裡驗證過的函式算出來，不是另外編的公式。
+analysis_core_v2.py 裡驗證過的函式算出來，不是另外編的公式。
 
 【過期資料保護】mt5.copy_rates_from_pos() 有個已知坑：商品剛被 symbol_select()
 加進報價視窗時，終端機可能還沒同步到最新報價，這支API不會因為資料舊就報錯，
@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 import MetaTrader5 as mt5
 
-import gordon_full_analysis as gfa
+import analysis_core_v2 as gfa
 
 OUTPUT_FOLDER = r"D:\GordonExchange"
 OUTPUT_PATH = os.path.join(OUTPUT_FOLDER, "AnalysisResults.csv")
@@ -67,7 +67,7 @@ STALE_MULT = 3  # 最新一根K棒的時間，如果比「現在 - N倍週期」
 TICK_WAIT_TIMEOUT_SEC = 2.0
 RETRY_ATTEMPTS = 4  # 抓到過期資料時最多重抓幾次，給終端機時間在背景補齊本地歷史快取
 RETRY_WAIT_SEC = 1.5
-STALE_LOG = []  # main()/RunDashboardUpdate 結束時用來統計、印出總共幾筆抓到過期資料
+STALE_LOG = []  # main()/run_csv_export_v2 結束時用來統計、印出總共幾筆抓到過期資料
 
 
 def wait_for_live_tick(symbol, timeout=TICK_WAIT_TIMEOUT_SEC):

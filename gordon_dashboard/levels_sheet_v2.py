@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-gordon_levels_module_v1.py
+levels_sheet_v2.py
 
 給 Gordon_FTMO_監控儀表板.xlsm 的「關卡」分頁用(用法跟 Data 分頁一樣，貼進去
 不動公式)。
 
-支撐/壓力的計算方式跟 gordon_full_analysis.py 裡 compute_final_signal() 用的
+支撐/壓力的計算方式跟 analysis_core_v2.py 裡 compute_final_signal() 用的
 是同一套公式(近期20根K棒高低、觸碰次數判斷有效性、容忍值算法)，這裡把它獨立
 抽出來輸出成單獨一欄一欄的數值，而不是像 compute_final_signal 那樣只回傳合成
-後的最終訊號。這不是新邏輯，是把 gordon_full_analysis.py 內部已經在用、已驗證
+後的最終訊號。這不是新邏輯，是把 analysis_core_v2.py 內部已經在用、已驗證
 正確的公式攤開來顯示。
 
-跟 gordon_analysis_engine_v1.py 一樣：12商品 x D1/H4/H1/M15/M5 共5週期 = 60列，
+跟 data_sheet_v2.py 一樣：12商品 x D1/H4/H1/M15/M5 共5週期 = 60列，
 跟「說明」分頁描述的一致。
 
-【輸出路徑改到非同步資料夾】原因跟 gordon_analysis_engine_v1.py 開頭寫的一樣：
+【輸出路徑改到非同步資料夾】原因跟 data_sheet_v2.py 開頭寫的一樣：
 D:\historical_data\ 被設定Google雲端硬碟自動同步，事後會把本地檔案處理掉，
 改輸出到不受同步影響的 D:\GordonExchange\。
 
@@ -27,8 +27,8 @@ import numpy as np
 import pandas as pd
 import MetaTrader5 as mt5
 
-import gordon_full_analysis as gfa
-from gordon_analysis_engine_v1 import fetch_mt5_df, MT5_TIMEFRAME_MAP
+import analysis_core_v2 as gfa
+from data_sheet_v2 import fetch_mt5_df, MT5_TIMEFRAME_MAP
 
 OUTPUT_FOLDER = r"D:\GordonExchange"
 OUTPUT_PATH = os.path.join(OUTPUT_FOLDER, "LevelsResults.csv")
@@ -50,7 +50,7 @@ TOUCH_LOOKBACK = 20
 
 
 def support_resistance(df):
-    """跟 gordon_full_analysis.compute_final_signal() 裡完全相同的公式，只是把
+    """跟 analysis_core_v2.compute_final_signal() 裡完全相同的公式，只是把
     中間值(支撐/壓力/觸碰次數/有效性)攤開回傳，而不是只回傳合成後的最終訊號。"""
     close, high, low = df["close"], df["high"], df["low"]
     last_price = close.iloc[-1]
@@ -99,7 +99,7 @@ def analyze_one(symbol, tf_name, df=None, daily=None):
     volume_ma20 = df["volume"].tail(20).mean() if "volume" in df.columns else np.nan
     volume_breakout = (
         not np.isnan(volume_ma20) and volume_ma20 > 0 and volume_current > volume_ma20 * 1.2
-    )  # 跟 gordon_full_analysis.compute_final_signal 的放量門檻(1.2倍)一致
+    )  # 跟 analysis_core_v2.compute_final_signal 的放量門檻(1.2倍)一致
 
     ma20 = close.rolling(20).mean().iloc[-1]
     ma50 = close.rolling(50).mean().iloc[-1]
