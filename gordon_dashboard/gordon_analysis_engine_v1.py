@@ -59,6 +59,8 @@ MT5_TIMEFRAME_MAP = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5
 TF_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
 STALE_MULT = 3  # 最新一根K棒的時間，如果比「現在 - N倍週期」還舊，判定為過期
 TICK_WAIT_TIMEOUT_SEC = 2.0
+RETRY_ATTEMPTS = 4  # 抓到過期資料時最多重抓幾次，給終端機時間在背景補齊本地歷史快取
+RETRY_WAIT_SEC = 1.5
 STALE_LOG = []  # main()/RunDashboardUpdate 結束時用來統計、印出總共幾筆抓到過期資料
 
 
@@ -77,27 +79,45 @@ def wait_for_live_tick(symbol, timeout=TICK_WAIT_TIMEOUT_SEC):
 
 
 def fetch_mt5_df(symbol, tf_name, count=None):
+    """
+    抓K棒資料。MT5 的 copy_rates_from_pos 只會回傳終端機本地已經快取住的歷史，
+    不會強迫跟券商即時同步——如果這個商品/週期很少在 MT5 裡被實際打開過圖表，
+    本地快取可能停在很久以前，API 不會報錯，會把這份不完整的舊資料當「成功」
+    回傳。這裡抓到過期資料時不會就這樣放行，而是重抓幾次、每次之間等一下，
+    給終端機時間在背景把缺的歷史補齊；重試完還是舊的，才會真的判定過期並警告。
+    """
     if count is None:
         count = gfa.OPT_LOOKBACK_BARS.get(tf_name, 2000) + 300  # 多抓一點給指標暖機用
     if not mt5.symbol_select(symbol, True):
         raise RuntimeError(f"{symbol}：券商找不到這個商品代碼，請確認 MT5 報價視窗裡的實際代號")
     wait_for_live_tick(symbol)
-    rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAME_MAP[tf_name], 0, count)
-    if rates is None or len(rates) == 0:
-        raise RuntimeError(f"{symbol} {tf_name}：抓不到K棒資料，{mt5.last_error()}")
-    df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    df = df.rename(columns={"tick_volume": "volume"})
 
-    last_bar_age_sec = (pd.Timestamp.now() - df["time"].iloc[-1]).total_seconds()
     max_age_sec = TF_SECONDS.get(tf_name, 900) * STALE_MULT
+    df = None
+    last_bar_age_sec = None
+    for attempt in range(RETRY_ATTEMPTS):
+        rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAME_MAP[tf_name], 0, count)
+        if rates is None or len(rates) == 0:
+            raise RuntimeError(f"{symbol} {tf_name}：抓不到K棒資料，{mt5.last_error()}")
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df = df.rename(columns={"tick_volume": "volume"})
+        last_bar_age_sec = (pd.Timestamp.now() - df["time"].iloc[-1]).total_seconds()
+        if last_bar_age_sec <= max_age_sec:
+            break
+        if attempt < RETRY_ATTEMPTS - 1:
+            print(f"[重試 {attempt + 1}/{RETRY_ATTEMPTS}] {symbol} {tf_name}：抓到的還是舊資料"
+                  f"(最新K棒 {df['time'].iloc[-1]})，等終端機補齊本地歷史後再抓一次...")
+            time.sleep(RETRY_WAIT_SEC)
+
     df.attrs["is_stale"] = last_bar_age_sec > max_age_sec
     df.attrs["last_bar_age_sec"] = last_bar_age_sec
     if df.attrs["is_stale"]:
         STALE_LOG.append((symbol, tf_name, last_bar_age_sec))
-        print(f"[警告] {symbol} {tf_name}：抓到的最新K棒時間是 {df['time'].iloc[-1]}，"
-              f"距現在已經 {last_bar_age_sec/60:.1f} 分鐘，可能是舊資料，不是即時報價。"
-              f"請確認 MT5 該商品已訂閱報價、市場有開盤。")
+        print(f"[警告] {symbol} {tf_name}：重試{RETRY_ATTEMPTS}次後，抓到的最新K棒時間還是 "
+              f"{df['time'].iloc[-1]}，距現在已經 {last_bar_age_sec/60:.1f} 分鐘。這代表 MT5 終端機"
+              f"對這個商品/週期的本地歷史快取不完整——請在 MT5 裡手動切到這個商品、這個週期的圖表看過"
+              f"一次(讓終端機把歷史抓下來)，或按 F2 開「歷史中心」手動下載更完整的歷史，再重跑一次。")
     return df
 
 
