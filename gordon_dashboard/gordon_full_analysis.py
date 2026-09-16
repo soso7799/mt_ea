@@ -5,7 +5,7 @@ gordon_full_analysis.py
 全新、自成一體的分析腳本，直接讀取 GDH_ExportCSV 匯出到
 D:\\資料查詢\\ExportCSV\\ 的 12商品 × 多週期 歷史 CSV 檔案，完成：
 
- 1. 每個商品、每個週期(D1/H4/H1/M15)：11大指標參數優化(比較勝率)，
+ 1. 每個商品、每個週期(D1/H4/H1/M15/M5)：11大指標參數優化(比較勝率)，
     並用 ATR 動態算出建議 SL/TP。
  2. 每個商品的 M15/H1 多空共振投票(趨勢層) + 支撐壓力/成交量三層合成的
     最終訊號(M15_Final/H1_Final，跟 ExcelMonitor_All.mq5 的 M5 邏輯呼應)，
@@ -49,7 +49,7 @@ SYMBOLS = [
     "EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF", "XAUUSD",
     "US500.cash", "US30.cash", "US100.cash", "JP225.cash",
 ]
-TIMEFRAMES = ["D1", "H4", "H1", "M15"]
+TIMEFRAMES = ["D1", "H4", "H1", "M15", "M5"]
 
 # ---------------- 11指標參數搜尋範圍(跟optimize.py同一套，維持一致性) ----------------
 MA_SHORT_GRID = [5, 8, 10, 13]
@@ -70,7 +70,7 @@ ATR_PERIOD = 14
 ATR_SL_MULT = 1.5
 ATR_TP_MULT = 3.0
 MAX_HOLD_BARS = 60
-OPT_LOOKBACK_BARS = {"D1": 500, "H4": 800, "H1": 1200, "M15": 2000}
+OPT_LOOKBACK_BARS = {"D1": 500, "H4": 800, "H1": 1200, "M15": 2000, "M5": 3000}
 
 AUTO_CLEANUP_OLD_EXPORTS = True  # 分析完後自動刪除每個商品/週期用不到的舊匯出檔，只留最新一份
 

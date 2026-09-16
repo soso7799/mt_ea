@@ -11,9 +11,8 @@ gordon_levels_module_v1.py
 後的最終訊號。這不是新邏輯，是把 gordon_full_analysis.py 內部已經在用、已驗證
 正確的公式攤開來顯示。
 
-【跟「說明」分頁描述的已知差異】
-跟 gordon_analysis_engine_v1.py 一樣：12商品 x D1/H4/H1/M15 共4週期 = 48列，
-不是原本說的60列(12x5週期)，因為真實系統只支援4個週期。
+跟 gordon_analysis_engine_v1.py 一樣：12商品 x D1/H4/H1/M15/M5 共5週期 = 60列，
+跟「說明」分頁描述的一致。
 
 輸出：D:\\historical_data\\LevelsResults.csv
 """

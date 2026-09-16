@@ -8,15 +8,11 @@ gordon_analysis_engine_v1.py
 (你 Google 雲端硬碟裡真實在跑、有真實輸出資料驗證過的分析引擎)裡的指標計算
 (ATR/RSI/MACD)、訊號判斷(compute_votes_latest 三層合成訊號)、ATR動態SL/TP邏輯
 (ATR_SL_MULT/ATR_TP_MULT)，只是換一種輸出格式，貼進 Data 分頁。商品/週期跟
-gordon_full_analysis.py 完全一致：12商品、D1/H4/H1/M15共4週期。
+gordon_full_analysis.py 完全一致：12商品、D1/H4/H1/M15/M5共5週期，12x5=60列，
+跟「說明」分頁描述的一致。
 
-【跟「說明」分頁原本描述的已知差異，老實列出，不是我漏做】
-1. 原本說 Data 是「60列=12商品x5週期」，但 gordon_full_analysis.py(真實在跑的
-   引擎)只支援4個週期，沒有第5個，所以這裡輸出 12x4=48列，不是60列。如果你要湊
-   滿5個週期(例如加W1)，跟我說一聲，可以在 gordon_full_analysis.py 的
-   TIMEFRAMES 跟這支一起加。
-2. 32欄的欄名是我設計的(你先前答覆「沒有現成標題」)，但每一欄的數值都是直接呼叫
-   gordon_full_analysis.py 裡驗證過的函式算出來，不是另外編的公式。
+32欄的欄名是我設計的(你先前答覆「沒有現成標題」)，但每一欄的數值都是直接呼叫
+gordon_full_analysis.py 裡驗證過的函式算出來，不是另外編的公式。
 
 輸出：D:\\historical_data\\AnalysisResults.csv(跟你 VBA 巨集 RefreshAllData 的
 csvFolder 一致，csvFolder 本身不用改)。
@@ -48,11 +44,13 @@ CORRELATION_GROUPS = {
     "EURUSD": "EURUSD/USDCHF", "USDCHF": "EURUSD/USDCHF",
 }
 
-MT5_TIMEFRAME_MAP = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1,
+MT5_TIMEFRAME_MAP = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1,
                       "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1}
 
 
-def fetch_mt5_df(symbol, tf_name, count=2200):
+def fetch_mt5_df(symbol, tf_name, count=None):
+    if count is None:
+        count = gfa.OPT_LOOKBACK_BARS.get(tf_name, 2000) + 300  # 多抓一點給指標暖機用
     if not mt5.symbol_select(symbol, True):
         raise RuntimeError(f"{symbol}：券商找不到這個商品代碼，請確認 MT5 報價視窗裡的實際代號")
     rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAME_MAP[tf_name], 0, count)

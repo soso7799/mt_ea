@@ -42,9 +42,11 @@
   成交量)的CSV。這支是原封不動照抄，沒有改動。
 - `gordon_full_analysis.py` — 讀 `D:\資料查詢\ExportCSV\` 裡每個商品/週期最新的CSV，跑
   11指標網格回測找最佳參數、算ATR動態SL/TP、M15/H1多空共振+三層合成最終訊號、8→12商品
-  兩兩配對算避險相關性。
+  兩兩配對算避險相關性。`TIMEFRAMES` 是 D1/H4/H1/M15/M5 共5個週期(`compute_final_signal()`
+  的註解本來就寫「跟 ExcelMonitor_All.mq5 M5 那邊同一套邏輯」，這裡把 M5 補進清單，
+  跟備份檔案裡原本只有4個週期的版本不同)。
 - `gordon_analysis_engine_v1.py` — 給最早那個 `Gordon_FTMO_監控儀表板.xlsm`「Data」分頁
-  用。直連 MT5 抓12商品×4週期報價，呼叫 `gordon_full_analysis.py` 裡驗證過的指標函式
+  用。直連 MT5 抓12商品×5週期報價，呼叫 `gordon_full_analysis.py` 裡驗證過的指標函式
   (ATR/RSI/MACD/三層合成訊號)算出32欄，輸出 `D:\historical_data\AnalysisResults.csv`。
   不是另外發明的邏輯，是把 `gordon_full_analysis.py` 的真實計算結果換一種格式輸出。
 - `gordon_levels_module_v1.py` — 給「關卡」分頁用。支撐/壓力公式跟
@@ -53,9 +55,10 @@
   的最終訊號。輸出 `D:\historical_data\LevelsResults.csv`。
 
 `gordon_analysis_engine_v1.py`/`gordon_levels_module_v1.py` 這兩支已用模擬報價資料驗證
-跑得通：`AnalysisResults.csv` 48列×32欄、`LevelsResults.csv` 48列×28欄。跟你原本 VBA 巨集
-`RefreshAllData` 的 `csvFolder = "D:\historical_data\"` 一致，不用改巨集，兩支腳本跑完、
-CSV 產生出來之後，巨集就能正常匯入，不會再顯示「找不到檔案」。
+跑得通：`AnalysisResults.csv` 60列×32欄、`LevelsResults.csv` 60列×28欄(12商品×5週期，
+跟「說明」分頁原本描述的一致)。跟你原本 VBA 巨集 `RefreshAllData` 的
+`csvFolder = "D:\historical_data\"` 一致，不用改巨集，兩支腳本跑完、CSV 產生出來之後，
+巨集就能正常匯入，不會再顯示「找不到檔案」。
 
 ## 怎麼跑
 
@@ -82,9 +85,6 @@ pip install -r requirements.txt
    `作戰計畫_v5最終版.xlsm`、`ExcelMonitor_All.mq5` 這些 Excel/mq5 檔案我沒有拉進這個
    repo(都是二進位檔，不適合放程式碼倉庫)，你雲端硬碟「資料查詢/備份檔/
    最終正確版_FinalPackage/」裡都有，需要的話直接從那邊拿。
-2. `gordon_analysis_engine_v1.py`/`gordon_levels_module_v1.py` 輸出的是 12商品×4週期＝
-   48列，不是「說明」分頁寫的60列(12商品×5週期)，因為真實系統(`gordon_full_analysis.py`)
-   只支援4個週期，沒有第5個。如果你要湊滿5週期，跟我說要加哪個(例如W1)，兩支一起加。
-3. Data(32欄)/關卡(28欄) 的欄名是我設計的(你先前答覆「沒有現成標題」)，如果你的 Excel
+2. Data(32欄)/關卡(28欄) 的欄名是我設計的(你先前答覆「沒有現成標題」)，如果你的 Excel
    分頁裡已經有自己手動打好的表頭，兩邊對不上的話，巨集會把資料貼到錯的欄位底下——把你
    Excel 裡實際的表頭貼給我，我可以照著調整 `COLUMNS` 順序。
