@@ -1,53 +1,74 @@
-# Gordon FTMO 監控 - 分析引擎（從零重新開發版）
+# Gordon FTMO 分析系統（從 Google Drive 還原的真實版本）
 
-這個資料夾是重新開發的 `gordon_analysis_engine_v1.py` / `gordon_levels_module_v1.py`，
-取代找不到的原始檔案。因為原始檔案內容沒有拿到，這是全新寫的一版，**不是修復舊檔案**，
-欄位設計跟判斷邏輯都是我依照你 Excel「說明」分頁截圖裡的描述重新設計的假設，不一定跟你
-原本用的版本一致，需要你先核對。
+這個資料夾放的是你 Google 雲端硬碟「資料查詢」裡**真正存在、真正在跑**的分析腳本，
+不是憑空編的。過程紀錄如下，方便你核對。
+
+## 這兩支腳本是怎麼來的
+
+最早那個 `Gordon_FTMO_監控儀表板.xlsm`（Data/監控/策略規則/儀表板/關卡 分頁，配
+`gordon_analysis_engine_v1.py`/`gordon_levels_module_v1.py`、輸出到
+`D:\historical_data\`）——**這兩支 py 在你雲端硬碟裡完全找不到，從來沒被寫出來過**，
+所以 VBA 巨集才會一直報「找不到檔案」。這不是你搞丟了，是它們本來就不存在。
+
+用 Google Drive 搜尋後，找到你真正在用、有實際輸出資料(2026-09-12)的另一套系統，
+說明寫在「資料查詢/備份檔/最終正確版_FinalPackage/00_README_請先看這個.txt」：
+
+- 主檔案：`作戰計畫_v5最終版.xlsm`
+- 抓報價：`ExcelMonitor_All.mq5`(MT5指標，背景每5秒寫CSV) + `gordon_mt5_incremental.py`
+- 分析引擎：`gordon_full_analysis.py`
+- 全部放在 `D:\資料查詢\` 底下，不是 `D:\historical_data\`
+
+## gordon_full_analysis.py 的還原細節
+
+你的「策略」備份資料夾裡這支腳本其實有兩份：一份 27883 bytes(12:15存)，一份
+`gordon_full_analysis..py`(檔名多一點) 31678 bytes(同一天22:19存，更晚、更完整，
+多了「支撐壓力+趨勢+成交量」三層合成訊號、跟 `ExcelMonitor_All.mq5` 的 M5 邏輯呼應)。
+這裡採用的是**比較完整的那份**。
+
+**商品清單擴充**：備份檔裡這支腳本的 `SYMBOLS` 只寫了8個
+(EURUSD/GBPUSD/USDJPY/USDCAD/AUDUSD/NZDUSD/USDCHF/XAUUSD)，但同一個資料夾裡真實的
+輸出結果 `AllSymbols_DashboardParams.csv` / `AllSymbols_OptimizedParams.txt` 明明白白
+算出了 `US500.cash`/`US30.cash`/`US100.cash`/`JP225.cash` 這4個指數商品的結果——代表
+實際在跑的版本是12個商品，備份的原始碼落後於實際使用版本。這裡依照那份真實輸出資料，
+把 `SYMBOLS` 補齊成這12個，**邏輯完全沒動，只補了清單**。
+
+已用假資料驗證跑得通：`MultiTF_Signals.csv` 輸出12列、`AllSymbols_DashboardParams.csv`
+輸出48列(12商品×4週期)，格式跟你雲端硬碟裡真實的舊輸出檔案一致。
 
 ## 這是什麼
 
-- `gordon_analysis_engine_v1.py` → 產生 `AnalysisResults.csv`（12商品 x 5週期 = 60列，32欄），給 Excel「Data」分頁用。
-- `gordon_levels_module_v1.py` → 產生 `LevelsResults.csv`（12商品 x 5週期 = 60列，28欄），給 Excel「關卡」分頁用。
-- `gordon_common.py` → 兩支共用的設定（商品清單、週期、輸出路徑）跟工具函式（連線 MT5、算指標）。
-
-兩支都連 MT5 抓報價，**只能在有安裝 MT5 終端機、且已登入帳號的 Windows 電腦上執行**。這次
-開發是在 Linux 容器裡做的，沒有 MT5 可以連，所以是用假資料模擬測試邏輯跑得通、欄位數量對
-（60列/32欄、60列/28欄），並沒有實際對過你券商的真實報價，第一次在你電腦上跑完，數字要自
-己抽查合理性。
+- `gordon_mt5_incremental.py` — 由 Excel Console 端傳入 `--symbol --timeframe --amount
+  --unit --output` 等參數呼叫，直連 MT5 抓歷史資料，輸出成中文表頭(日期,開,高,低,收,
+  成交量)的CSV。這支是原封不動照抄，沒有改動。
+- `gordon_full_analysis.py` — 讀 `D:\資料查詢\ExportCSV\` 裡每個商品/週期最新的CSV，跑
+  11指標網格回測找最佳參數、算ATR動態SL/TP、M15/H1多空共振+三層合成最終訊號、8→12商品
+  兩兩配對算避險相關性。
 
 ## 怎麼跑
 
 ```bash
 pip install -r requirements.txt
-python gordon_analysis_engine_v1.py
-python gordon_levels_module_v1.py
 ```
 
-跑完後 CSV 預設會存到 `D:\historical_data\`（跟你原本 VBA 巨集 `RefreshAllData` 裡的
-`csvFolder` 一致），接著在 Excel 按巨集就能匯入。
+1. 用 `Gordon_FTMO_Data_Console_多選多週期版.xlsm` 的「市場清單」勾選商品/週期，跑
+   `GDH_BatchExportSelected` 巨集，批次匯出歷史CSV到 `D:\資料查詢\ExportCSV\`
+   (內部會呼叫 `gordon_mt5_incremental.py` 逐筆抓)。
+2. 執行 `python gordon_full_analysis.py`，讀 ExportCSV 裡的資料做分析，輸出：
+   - `AllSymbols_OptimizedParams.txt`
+   - `MultiTF_Signals.csv`
+   - `HedgePairs.csv`
+   - `AllSymbols_DashboardParams.csv`
+3. 打開 `量化分析儀表板_全新版.xlsx`(第一次要另存成.xlsm並匯入RefreshDashboard巨集)，
+   按「更新儀表板」看結果。
 
-## 【需要你確認/可能要調整的地方】
+這兩支都要連 MT5，只能在有安裝 MT5 終端機、已登入帳號的 Windows 電腦上執行。
 
-1. **商品清單（12個）**：`gordon_common.py` 裡的 `SYMBOLS`，我用你提過的三組避險關係
-   （AUDUSD/NZDUSD、US500/US30、EURUSD/USDCHF）回推補齊到12個，不一定是你實際交易的商品，
-   要改直接改這個 list。**商品代碼也要注意**：有些券商代碼會加後綴（例如 `EURUSD.m`、
-   `US500.cash`），要改成你 MT5 報價視窗裡實際看到的代碼，不然會出現「找不到商品代碼」的錯誤。
-2. **週期（5個）**：目前是 M15/H1/H4/D1/W1。
-3. **Data 分頁32欄、關卡分頁28欄的欄名跟順序**：完全是我自己設計的（各檔案開頭都有清楚列
-   出欄位跟判斷邏輯的註解），跟你原本可能用的欄位不一定一致，要改欄位要去 `COLUMNS` list
-   跟對應的 `analyze_one()` 函式一起改。
-4. **訊號/SL/TP判斷邏輯**：目前用「收盤價 vs MA50 判趨勢、RSI14 篩訊號、ATR14 x 1.5/3 算
-   SL/TP」，這只是一個能動的起始版本，跟你原本「Gordon策略」的實際規則八成不一樣，判斷邏輯
-   在 `gordon_analysis_engine_v1.py` 的 `analyze_one()` 裡，改倍數或條件都在那個函式。
-5. **關卡0.3%提醒、成交量突破倍數(1.5x)**：在 `gordon_levels_module_v1.py` 開頭的
-   `KEY_LEVEL_ALERT_PCT`、`VOLUME_BREAKOUT_MULT` 常數，可直接調。
-6. **點值(策略規則分頁用的每商品每手美元值)**：這兩支腳本沒有輸出這欄，維持你原本 Excel
-   設計 — 這欄要你自己在「策略規則」分頁手動填，因為每個券商合約規格不同，程式沒辦法幫你
-   確定。
+## 【還沒解決、需要你確認的地方】
 
-## 跟舊版巨集的關係
-
-`RefreshAllData` VBA 巨集本身不用改，它只是把 CSV 讀進 Excel，跟 CSV 內容從哪支程式產生
-無關。之前巨集報「找不到檔案」，只要這兩支腳本先成功在 `D:\historical_data\` 產生
-`AnalysisResults.csv` / `LevelsResults.csv`，巨集就能正常匯入。
+1. `D:\資料查詢\` 這個路徑、`Gordon_FTMO_Data_Console_多選多週期版.xlsm`、
+   `作戰計畫_v5最終版.xlsm`、`ExcelMonitor_All.mq5` 這些 Excel/mq5 檔案我沒有拉進這個
+   repo(都是二進位檔，不適合放程式碼倉庫)，你雲端硬碟「資料查詢/備份檔/
+   最終正確版_FinalPackage/」裡都有，需要的話直接從那邊拿。
+2. 你原本問的「Data/關卡」12商品×5週期、`AnalysisResults.csv`/`LevelsResults.csv`那套
+   系統，目前確認完全沒有對應程式碼存在——如果你還是想要那一套（跟這裡的「作戰計畫」系統
+   是分開的兩個東西），需要另外從頭設計，不是修復。
