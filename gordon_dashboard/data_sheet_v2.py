@@ -16,10 +16,16 @@ analysis_core_v2.py 裡驗證過的函式算出來，不是另外編的公式。
 
 【過期資料保護】mt5.copy_rates_from_pos() 有個已知坑：商品剛被 symbol_select()
 加進報價視窗時，終端機可能還沒同步到最新報價，這支API不會因為資料舊就報錯，
-會安靜地把本地快取裡的舊K棒當成功結果回傳。這裡加了兩層保護：抓資料前先等到
-有夠新的即時tick出現(wait_for_live_tick)；抓完資料後檢查最新一根K棒的時間，
-如果比現在舊超過(週期秒數x3)，會在終端機印出[警告]並在最後統計總共幾筆過期，
-不會悄悄放行舊資料。
+會安靜地把本地快取裡的舊K棒當成功結果回傳。這裡加了兩層保護：抓資料前先取得
+券商時間基準(get_reference_now，優先用即時tick，市場關閉/冷門商品拿不到tick時
+退而求其次用symbol_info的最後報價時間，一律是券商時間)；抓完資料後檢查最新
+一根K棒的時間，如果比這個基準舊超過(週期秒數x3)，會在終端機印出[警告]並在
+最後統計總共幾筆過期，不會悄悄放行舊資料。
+
+【指數/USDCNH這類非24小時交易商品的特別處理】這些商品交易時段外本來就沒有
+即時tick，一直等tick會一直等不到——這種情況不能沒有時間基準就退回本地電腦
+時間(那樣會重演EURUSD等主要貨幣對之前被時區誤判成「過期」的bug)，改成用
+symbol_info()裡最後一次收到報價的時間，還是券商時間，不會有時區落差。
 
 【輸出路徑改到非同步資料夾 - 重要修正】原本輸出到 D:\historical_data\，但這個
 資料夾被你設定成 Google 雲端硬碟自動同步(Console批次匯出視窗自己講過)。實測發現
@@ -70,21 +76,28 @@ RETRY_WAIT_SEC = 1.5
 STALE_LOG = []  # main()/run_csv_export_v2 結束時用來統計、印出總共幾筆抓到過期資料
 
 
-def wait_for_live_tick(symbol, timeout=TICK_WAIT_TIMEOUT_SEC):
-    """symbol_select 剛把商品加進報價視窗時，終端機可能還沒收到第一筆即時報價，
-    這裡等到 tick 出現才繼續，避免緊接著的 copy_rates_from_pos 抓到終端機本地
-    快取裡的舊資料。回傳抓到的 tick(可能是 None)，讓呼叫端拿它的 time 當「現在」
-    的時間基準 —— 不能用 Python 本地的 time.time()/datetime.now() 去判斷這顆
-    tick 夠不夠新，因為 tick.time 是券商伺服器時間，跟使用者電腦本地時區不是
-    同一個時鐘，直接相減會被時差誤導成「一直等不到新tick」。"""
+def get_reference_now(symbol, timeout=TICK_WAIT_TIMEOUT_SEC):
+    """回傳用來判斷「現在」的時間基準，一律用券商伺服器時間，絕對不退回本地電腦
+    時間——本地時區跟券商可能差好幾小時，之前 EURUSD 等主要貨幣對就是因為退回
+    pd.Timestamp.now() 被誤判成「過期」，那個bug已經修過一次。
+
+    優先等一顆即時tick(symbol_select剛加進報價視窗時，終端機可能還沒收到第一筆
+    報價)。但指數(US500.cash等)、USDCNH這類非24小時交易、或交易時段本來就冷清的
+    商品，市場關閉時本來就不會有新tick進來，一直等也等不到——這種情況不能真的
+    「等不到就沒有時間基準」，而是退而求其次用 symbol_info() 裡最後一次收到報價
+    的時間(還是券商時間，只是不一定是「此刻」，但至少同一個時鐘、不會時區誤判)。
+    連 symbol_info 都拿不到時間，才真的代表沒有基準可用，回傳 None 讓呼叫端跳過
+    過期檢查，不要用本地時間硬湊一個會出錯的比較基準。"""
     deadline = time.time() + timeout
-    tick = None
     while time.time() < deadline:
         tick = mt5.symbol_info_tick(symbol)
         if tick and tick.time:
-            return tick
+            return pd.Timestamp(tick.time, unit="s")
         time.sleep(0.2)
-    return tick
+    info = mt5.symbol_info(symbol)
+    if info and info.time:
+        return pd.Timestamp(info.time, unit="s")
+    return None
 
 
 def fetch_mt5_df(symbol, tf_name, count=None):
@@ -112,7 +125,7 @@ def fetch_mt5_df(symbol, tf_name, count=None):
     df = None
     last_bar_age_sec = None
     for attempt in range(RETRY_ATTEMPTS):
-        tick = wait_for_live_tick(symbol)
+        reference_now = get_reference_now(symbol)
         rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAME_MAP[tf_name], 0, count)
         if rates is None or len(rates) == 0:
             raise RuntimeError(f"{symbol} {tf_name}：抓不到K棒資料，{mt5.last_error()}")
@@ -120,7 +133,11 @@ def fetch_mt5_df(symbol, tf_name, count=None):
         df["time"] = pd.to_datetime(df["time"], unit="s")
         df = df.rename(columns={"tick_volume": "volume"})
 
-        reference_now = pd.Timestamp(tick.time, unit="s") if tick and tick.time else pd.Timestamp.now()
+        if reference_now is None:
+            # 連券商時間基準都拿不到(這個商品可能剛加進報價視窗、還沒有任何報價
+            # 紀錄)，沒辦法判斷是否過期，直接信任這批資料，不要瞎猜。
+            last_bar_age_sec = 0.0
+            break
         last_bar_age_sec = (reference_now - df["time"].iloc[-1]).total_seconds()
         if last_bar_age_sec <= max_age_sec:
             break
