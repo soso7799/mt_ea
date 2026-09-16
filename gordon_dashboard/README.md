@@ -141,9 +141,14 @@ pip install -r requirements.txt
    `作戰計畫_v5最終版.xlsm`、`ExcelMonitor_All.mq5` 這些 Excel/mq5 檔案我沒有拉進這個
    repo(都是二進位檔，不適合放程式碼倉庫)，你雲端硬碟「資料查詢/備份檔/
    最終正確版_FinalPackage/」裡都有，需要的話直接從那邊拿。
-2. Data(32欄)/關卡(28欄) 的欄名是我設計的(你先前答覆「沒有現成標題」)，如果你的 Excel
-   分頁裡已經有自己手動打好的表頭，兩邊對不上的話，資料會貼到錯的欄位底下——把你
-   Excel 裡實際的表頭貼給我，我可以照著調整欄位順序。
+2. ~~Data(32欄)/關卡(28欄) 的欄名是我設計的，如果 Excel 分頁裡已經有自己手動打好的
+   表頭，兩邊對不上的話，資料會貼到錯的欄位底下~~ → 已解決：Data1分頁截圖顯示第1列
+   留著的是舊表頭(`symbol/tf/status/date/close/ma_fast/...`)，資料其實照我的欄位
+   順序正確寫進去了(第3欄的值是BarTime時間戳，但舊表頭還寫著`status`，兩者對不上)。
+   這其實就是整個對話裡反覆出現、一直沒查出來源的「symbol/tf/status/date表格」——
+   它從頭到尾就是這張分頁自己的舊表頭，不是別的腳本。現在 `write_sheet()` 改成
+   連第1列表頭也一起蓋成程式自己的欄位名稱(`analysis_core_v2.py`裡`engine.COLUMNS`/
+   `levels.COLUMNS`)，不再假設分頁裡已經有對得上的表頭。
 3. `push_to_excel_v2.py` 依賴 xlwings 透過 COM 操作 Excel，這段沒辦法在開發環境
    (Linux容器，沒有真正的Excel)裡實際跑過，只做了語法檢查跟模擬測試。第一次在你
    電腦上執行如果有錯誤訊息，貼給我。

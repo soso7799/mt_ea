@@ -70,8 +70,17 @@ def find_sheet(wb, candidates):
 
 
 def write_sheet(ws, rows, columns):
-    """清掉分頁第2列以後、欄位範圍內的舊資料(表頭跟輔助公式欄不動)，再貼新資料。
-    邏輯照抄原本 VBA 的 ImportCSVToSheet，只是執行位置從VBA搬到Python。"""
+    """把表頭(第1列)也一併蓋成這支程式自己的欄位名稱，再貼新資料。
+
+    之前版本假設分頁裡已經有跟這支程式欄位對得上的表頭、所以不動第1列——結果
+    使用者的分頁裡留著別的舊表格的表頭(symbol/tf/status/date/close/ma_fast/...)，
+    造成資料寫進去了、但欄名對不起來(例如第3欄實際是BarTime，但表頭還寫著
+    status)。既然表頭對不上，就不該假裝它是對的，直接蓋掉，欄名跟資料才會一致。
+    """
+    header_clear_cols = max(len(columns), 60)
+    ws.range((1, 1), (1, header_clear_cols)).clear_contents()
+    ws.range((1, 1)).value = [columns]
+
     n = len(rows)
     clear_rows = max(n, 200)
     ws.range((2, 1), (clear_rows + 1, len(columns))).clear_contents()
