@@ -45,26 +45,44 @@
   兩兩配對算避險相關性。`TIMEFRAMES` 是 D1/H4/H1/M15/M5 共5個週期(`compute_final_signal()`
   的註解本來就寫「跟 ExcelMonitor_All.mq5 M5 那邊同一套邏輯」，這裡把 M5 補進清單，
   跟備份檔案裡原本只有4個週期的版本不同)。
-- `gordon_analysis_engine_v1.py` — 給最早那個 `Gordon_FTMO_監控儀表板.xlsm`「Data」分頁
-  用。直連 MT5 抓12商品×5週期報價，呼叫 `gordon_full_analysis.py` 裡驗證過的指標函式
-  (ATR/RSI/MACD/三層合成訊號)算出32欄，輸出 `D:\historical_data\AnalysisResults.csv`。
-  不是另外發明的邏輯，是把 `gordon_full_analysis.py` 的真實計算結果換一種格式輸出。
+- `gordon_analysis_engine_v1.py` — 給 `Gordon_FTMO_監控儀表板.xlsm`「Data」分頁用。直連
+  MT5 抓12商品×5週期報價，呼叫 `gordon_full_analysis.py` 裡驗證過的指標函式
+  (ATR/RSI/MACD/三層合成訊號)算出32欄。不是另外發明的邏輯，是把
+  `gordon_full_analysis.py` 的真實計算結果換一種格式輸出。
 - `gordon_levels_module_v1.py` — 給「關卡」分頁用。支撐/壓力公式跟
   `gordon_full_analysis.py` 的 `compute_final_signal()` 內部用的完全一樣(近期20根K棒
   高低、觸碰次數判斷有效性)，只是把中間值攤開成28欄輸出，而不是像原本那樣只回傳合成後
-  的最終訊號。輸出 `D:\historical_data\LevelsResults.csv`。
+  的最終訊號。
+- `RunDashboardUpdate.py` — 上面兩支的「一鍵執行」入口，見下方【怎麼跑】。
 
-`gordon_analysis_engine_v1.py`/`gordon_levels_module_v1.py` 這兩支已用模擬報價資料驗證
-跑得通：`AnalysisResults.csv` 60列×32欄、`LevelsResults.csv` 60列×28欄(12商品×5週期，
-跟「說明」分頁原本描述的一致)。跟你原本 VBA 巨集 `RefreshAllData` 的
-`csvFolder = "D:\historical_data\"` 一致，不用改巨集，兩支腳本跑完、CSV 產生出來之後，
-巨集就能正常匯入，不會再顯示「找不到檔案」。
+已用模擬報價資料驗證跑得通：`AnalysisResults.csv` 60列×32欄、`LevelsResults.csv` 60列×
+28欄(12商品×5週期，跟「說明」分頁原本描述的一致)。輸出路徑跟你原本 VBA 巨集
+`RefreshAllData` 的 `csvFolder = "D:\historical_data\"` 一致，不用改巨集。
 
 ## 怎麼跑
+
+這個資料夾其實對應你**兩套獨立的系統**，各自有各自的執行順序，不要混著跑。
 
 ```bash
 pip install -r requirements.txt
 ```
+
+### A. `Gordon_FTMO_監控儀表板.xlsm`(Data/監控/策略規則/儀表板/關卡)
+
+1. 打開 MT5 終端機，確認已登入你的 FTMO 帳號，圖表能正常跳動報價。
+2. 執行 `python RunDashboardUpdate.py`。這支會一次連線 MT5、抓完12商品×5週期的報價，
+   同時算出並寫入 `D:\historical_data\AnalysisResults.csv` 跟
+   `D:\historical_data\LevelsResults.csv`，跑完才斷線一次——不要分開跑
+   `gordon_analysis_engine_v1.py`/`gordon_levels_module_v1.py` 兩支，那樣會變成連續
+   斷線重連兩次、報價也重複抓兩次。
+3. 回到 `Gordon_FTMO_監控儀表板.xlsm`，按「RefreshAllData」巨集，兩個CSV就會一次匯入
+   Data / 關卡 兩個分頁。
+
+【MT5會不會被關掉】跑完 `RunDashboardUpdate.py`，MT5 終端機應用程式本身不會被關閉——
+`mt5.shutdown()` 只是斷開 Python 跟終端機之間的資料連線，跟你手動關閉終端機視窗是
+兩回事，終端機、你開的圖表/其他EA都不受影響，可以放心重複執行這支腳本。
+
+### B. `作戰計畫_v5最終版.xlsm`(另一套獨立系統，跟A無關)
 
 1. 用 `Gordon_FTMO_Data_Console_多選多週期版.xlsm` 的「市場清單」勾選商品/週期，跑
    `GDH_BatchExportSelected` 巨集，批次匯出歷史CSV到 `D:\資料查詢\ExportCSV\`
@@ -77,7 +95,8 @@ pip install -r requirements.txt
 3. 打開 `量化分析儀表板_全新版.xlsx`(第一次要另存成.xlsm並匯入RefreshDashboard巨集)，
    按「更新儀表板」看結果。
 
-這兩支都要連 MT5，只能在有安裝 MT5 終端機、已登入帳號的 Windows 電腦上執行。
+以上兩套系統的所有腳本都要連 MT5，只能在有安裝 MT5 終端機、已登入帳號的 Windows 電腦上
+執行。
 
 ## 【還沒解決、需要你確認的地方】
 

@@ -62,8 +62,9 @@ def fetch_mt5_df(symbol, tf_name, count=None):
     return df
 
 
-def analyze_one(symbol, tf_name):
-    df = fetch_mt5_df(symbol, tf_name)
+def analyze_one(symbol, tf_name, df=None):
+    if df is None:
+        df = fetch_mt5_df(symbol, tf_name)
     close, high, low = df["close"], df["high"], df["low"]
 
     tick = mt5.symbol_info_tick(symbol)

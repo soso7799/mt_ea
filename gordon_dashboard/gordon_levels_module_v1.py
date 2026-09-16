@@ -65,11 +65,13 @@ def support_resistance(df):
     return recent_sup, recent_res, support_touch, resistance_touch, support_valid, resistance_valid
 
 
-def analyze_one(symbol, tf_name):
-    df = fetch_mt5_df(symbol, tf_name)
+def analyze_one(symbol, tf_name, df=None, daily=None):
+    if df is None:
+        df = fetch_mt5_df(symbol, tf_name)
     close = df["close"]
 
-    daily = fetch_mt5_df(symbol, "D1", count=10)
+    if daily is None:
+        daily = fetch_mt5_df(symbol, "D1", count=10)
     yesterday = daily.iloc[-2] if len(daily) >= 2 else daily.iloc[-1]
     yesterday_high, yesterday_low = float(yesterday["high"]), float(yesterday["low"])
 
