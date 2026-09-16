@@ -41,6 +41,7 @@ def main():
     if not mt5.initialize():
         print(f"MT5 初始化失敗：{mt5.last_error()}", file=sys.stderr)
         return 1
+    engine.print_connection_info()
 
     analysis_rows, levels_rows, errors = [], [], []
     try:

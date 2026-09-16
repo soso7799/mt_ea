@@ -94,6 +94,7 @@ def main():
     if not mt5.initialize():
         print(f"MT5 初始化失敗：{mt5.last_error()}", file=sys.stderr)
         return 1
+    engine.print_connection_info()
 
     try:
         wb = xw.Book(WORKBOOK_NAME)

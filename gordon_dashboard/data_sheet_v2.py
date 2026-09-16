@@ -157,6 +157,27 @@ def fetch_mt5_df(symbol, tf_name, count=None):
     return df
 
 
+def print_connection_info():
+    """印出 Python 實際連到的 MT5 帳號/伺服器/終端機路徑。
+
+    加這個是因為指數(US500.cash等)/USDCNH明明在使用者螢幕上的MT5終端機裡即時
+    跳動、圖表也是最新的，但 Python 抓回來的K棒卻停在5小時前——如果終端機本身
+    的本地快取是新的，抓到舊資料最可能的原因就是 mt5.initialize() 連到了「另一個」
+    MT5 執行個體或帳號(例如背景還留著一個沒在看的終端機視窗)，而不是使用者正在
+    看的那個。這裡把連線身份印出來，跟使用者螢幕上終端機視窗標題列的帳號/伺服器
+    對一下，就能確認是不是連錯了。"""
+    account = mt5.account_info()
+    term = mt5.terminal_info()
+    if account:
+        print(f"[連線] 帳號 {account.login}｜伺服器 {account.server}｜名稱 {account.name}")
+    else:
+        print("[連線] 抓不到帳號資訊(mt5.account_info() 回傳 None)")
+    if term:
+        print(f"[連線] 終端機路徑 {term.path}｜已連線 {term.connected}｜允許交易 {term.trade_allowed}")
+    else:
+        print("[連線] 抓不到終端機資訊(mt5.terminal_info() 回傳 None)")
+
+
 def analyze_one(symbol, tf_name, df=None):
     if df is None:
         df = fetch_mt5_df(symbol, tf_name)
@@ -221,6 +242,7 @@ def main():
     if not mt5.initialize():
         print(f"MT5 初始化失敗：{mt5.last_error()}", file=sys.stderr)
         return 1
+    print_connection_info()
 
     rows, errors = [], []
     try:
