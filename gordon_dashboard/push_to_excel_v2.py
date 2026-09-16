@@ -20,12 +20,16 @@ VBA 的 RefreshAllData/ImportCSVToSheet 巨集不再需要，不用改、不用�
 
 【用法】
 1. 第一次要多裝一個套件：pip install xlwings
-2. 在 Gordon_FTMO_監控儀表板.xlsm 裡，把分頁名稱改成加了 GDX_ 前綴的新名稱
-   (GDX_說明/GDX_Data/GDX_監控/GDX_策略規則/GDX_儀表板/GDX_關卡)，避免跟其他
-   檔案的分頁名稱搞混。滑鼠在分頁標籤上連點兩下就能重新命名。
-3. 打開 Gordon_FTMO_監控儀表板.xlsm，保持它開著(不用做任何操作)
-4. 在這個資料夾底下執行：python push_to_excel_v2.py
-5. 資料會直接寫進 GDX_Data / GDX_關卡 兩個分頁，跑完就是最新的，不用再按任何巨集
+2. 打開 Gordon_FTMO_監控儀表板.xlsm(注意副檔名要是 .xlsm，不是 .xlsm.xlsx 之類
+   的複本)，保持它開著(不用做任何操作)
+3. 在這個資料夾底下執行：python push_to_excel_v2.py
+4. 資料會直接寫進「Data 分頁」跟「關卡 分頁」，跑完就是最新的，不用再按任何巨集
+
+【分頁名稱怎麼找】
+不用先手動改分頁名稱。程式會依序找 GDX_Data / Data1 / Data(關卡分頁對應
+GDX_關卡 / 關卡1 / 關卡)，三個候選名稱裡只要活頁簿裡存在其中一個就會用。
+如果三個都對不上，程式會直接印出這個活頁簿裡「實際的」分頁名稱清單，
+把那份清單貼給我就好，不用再截圖。
 
 【已知限制，老實說清楚】
 這支重用 data_sheet_v2.py / levels_sheet_v2.py 裡
@@ -45,8 +49,24 @@ import data_sheet_v2 as engine
 import levels_sheet_v2 as levels
 
 WORKBOOK_NAME = "Gordon_FTMO_監控儀表板.xlsm"
-DATA_SHEET = "GDX_Data"
-LEVELS_SHEET = "GDX_關卡"
+# 分頁名稱用「候選清單」而不是寫死一個字串：你不管是照指示改成 GDX_ 前綴、
+# 還是自己在後面加「1」、或根本沒改，都抓得到，不用逼你重新命名一次。
+DATA_SHEET_CANDIDATES = ["GDX_Data", "Data1", "Data"]
+LEVELS_SHEET_CANDIDATES = ["GDX_關卡", "關卡1", "關卡"]
+
+
+def find_sheet(wb, candidates):
+    """依序比對候選分頁名稱，抓到第一個存在的就回傳。
+    如果一個都對不上，把活頁簿裡「實際存在」的分頁名稱列出來，
+    這樣錯誤訊息本身就能回答「你的分頁到底叫什麼」，不用再截圖確認。"""
+    existing = {s.name: s for s in wb.sheets}
+    for name in candidates:
+        if name in existing:
+            return existing[name]
+    raise RuntimeError(
+        f"候選分頁名稱 {candidates} 在活頁簿裡都找不到。"
+        f"這個活頁簿目前實際的分頁名稱是：{list(existing.keys())}"
+    )
 
 
 def write_sheet(ws, rows, columns):
@@ -72,6 +92,14 @@ def main():
         mt5.shutdown()
         print(f"連不到已開啟的 {WORKBOOK_NAME}：{e}", file=sys.stderr)
         print("請先手動打開這個檔案、保持開著，再重跑這支。")
+        return 1
+
+    try:
+        data_ws = find_sheet(wb, DATA_SHEET_CANDIDATES)
+        levels_ws = find_sheet(wb, LEVELS_SHEET_CANDIDATES)
+    except RuntimeError as e:
+        mt5.shutdown()
+        print(str(e), file=sys.stderr)
         return 1
 
     analysis_rows, levels_rows, errors = [], [], []
@@ -109,12 +137,12 @@ def main():
         return 1
 
     if analysis_rows:
-        write_sheet(wb.sheets[DATA_SHEET], analysis_rows, engine.COLUMNS)
-        print(f"已寫入 Data 分頁：{len(analysis_rows)} 筆")
+        write_sheet(data_ws, analysis_rows, engine.COLUMNS)
+        print(f"已寫入「{data_ws.name}」分頁：{len(analysis_rows)} 筆")
 
     if levels_rows:
-        write_sheet(wb.sheets[LEVELS_SHEET], levels_rows, levels.COLUMNS)
-        print(f"已寫入 關卡 分頁：{len(levels_rows)} 筆")
+        write_sheet(levels_ws, levels_rows, levels.COLUMNS)
+        print(f"已寫入「{levels_ws.name}」分頁：{len(levels_rows)} 筆")
 
     wb.app.calculate()
 
