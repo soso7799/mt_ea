@@ -20,9 +20,12 @@ VBA 的 RefreshAllData/ImportCSVToSheet 巨集不再需要，不用改、不用�
 
 【用法】
 1. 第一次要多裝一個套件：pip install xlwings
-2. 打開 Gordon_FTMO_監控儀表板.xlsm，保持它開著(不用做任何操作)
-3. 在這個資料夾底下執行：python push_to_excel_v2.py
-4. 資料會直接寫進 Data / 關卡 兩個分頁，跑完就是最新的，不用再按任何巨集
+2. 在 Gordon_FTMO_監控儀表板.xlsm 裡，把分頁名稱改成加了 GDX_ 前綴的新名稱
+   (GDX_說明/GDX_Data/GDX_監控/GDX_策略規則/GDX_儀表板/GDX_關卡)，避免跟其他
+   檔案的分頁名稱搞混。滑鼠在分頁標籤上連點兩下就能重新命名。
+3. 打開 Gordon_FTMO_監控儀表板.xlsm，保持它開著(不用做任何操作)
+4. 在這個資料夾底下執行：python push_to_excel_v2.py
+5. 資料會直接寫進 GDX_Data / GDX_關卡 兩個分頁，跑完就是最新的，不用再按任何巨集
 
 【已知限制，老實說清楚】
 這支重用 data_sheet_v2.py / levels_sheet_v2.py 裡
@@ -42,8 +45,8 @@ import data_sheet_v2 as engine
 import levels_sheet_v2 as levels
 
 WORKBOOK_NAME = "Gordon_FTMO_監控儀表板.xlsm"
-DATA_SHEET = "Data"
-LEVELS_SHEET = "關卡"
+DATA_SHEET = "GDX_Data"
+LEVELS_SHEET = "GDX_關卡"
 
 
 def write_sheet(ws, rows, columns):
