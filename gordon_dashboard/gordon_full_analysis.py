@@ -22,13 +22,12 @@ D:\\資料查詢\\ExportCSV\\ 的 12商品 × 多週期 歷史 CSV 檔案，完�
 執行方式：直接 python gordon_full_analysis.py，不需要任何命令列參數，
 會自動掃描 ExportCSV 資料夾裡每個商品每個週期「最新」的那一份檔案。
 
-【SYMBOLS 清單說明】
+【SYMBOLS 清單說明 - 修正記錄】
 原始備份檔裡這支腳本只寫了8個商品(EURUSD/GBPUSD/USDJPY/USDCAD/AUDUSD/
-NZDUSD/USDCHF/XAUUSD)，但同一個資料夾裡實際的輸出結果
-(AllSymbols_DashboardParams.csv / AllSymbols_OptimizedParams.txt)明明白白
-算出了 US500.cash/US30.cash/US100.cash/JP225.cash 這4個指數商品的結果，
-代表實際在跑的版本是12個商品。這裡依照那份真實輸出資料把清單補齊到12個，
-其餘邏輯(指標、回測、輸出格式)完全比照原始版本，沒有更動。
+NZDUSD/USDCHF/XAUUSD)。一開始依照歷史輸出檔(AllSymbols_OptimizedParams.txt)
+把清單補到12個時誤用了 XAUUSD，後來直接對照 MT5 終端機上真正在跑的
+ExcelMonitor_All.mq5 指標畫面（分頁清單），確認第12個商品其實是 USDCNH，
+不是 XAUUSD —— 即時指標畫面比靜態的歷史輸出檔更權威，已改正。
 """
 
 import os
@@ -46,7 +45,7 @@ OUT_HEDGE_PATH = BASE_DIR + r"\HedgePairs.csv"
 LOG_PATH = BASE_DIR + r"\error_full_analysis.log"
 
 SYMBOLS = [
-    "EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF", "XAUUSD",
+    "EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF", "USDCNH",
     "US500.cash", "US30.cash", "US100.cash", "JP225.cash",
 ]
 TIMEFRAMES = ["D1", "H4", "H1", "M15", "M5"]
@@ -664,7 +663,7 @@ def main():
                 sl_price = atr_now * ATR_SL_MULT
                 tp_price = atr_now * ATR_TP_MULT
                 dashboard_sltp[(sym, tf)] = (sl_price, tp_price)
-                dg = 3 if sym in ("USDJPY", "XAUUSD") else 5
+                dg = 3 if sym == "USDJPY" else 5
                 sl_tp_str = f"SL={sl_price:.{dg}f}/TP={tp_price:.{dg}f}(ATR{ATR_PERIOD})"
 
                 def weighted_avg_winrate(res):

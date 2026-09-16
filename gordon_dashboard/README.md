@@ -25,15 +25,16 @@
 多了「支撐壓力+趨勢+成交量」三層合成訊號、跟 `ExcelMonitor_All.mq5` 的 M5 邏輯呼應)。
 這裡採用的是**比較完整的那份**。
 
-**商品清單擴充**：備份檔裡這支腳本的 `SYMBOLS` 只寫了8個
-(EURUSD/GBPUSD/USDJPY/USDCAD/AUDUSD/NZDUSD/USDCHF/XAUUSD)，但同一個資料夾裡真實的
-輸出結果 `AllSymbols_DashboardParams.csv` / `AllSymbols_OptimizedParams.txt` 明明白白
-算出了 `US500.cash`/`US30.cash`/`US100.cash`/`JP225.cash` 這4個指數商品的結果——代表
-實際在跑的版本是12個商品，備份的原始碼落後於實際使用版本。這裡依照那份真實輸出資料，
-把 `SYMBOLS` 補齊成這12個，**邏輯完全沒動，只補了清單**。
+**商品清單擴充(含一次修正)**：備份檔裡這支腳本的 `SYMBOLS` 只寫了8個
+(EURUSD/GBPUSD/USDJPY/USDCAD/AUDUSD/NZDUSD/USDCHF/XAUUSD)。第一次依照歷史輸出檔
+`AllSymbols_DashboardParams.csv`/`AllSymbols_OptimizedParams.txt` 補到12個時，把第
+12個商品誤判成 XAUUSD；後來直接對照 MT5 終端機上**真正在跑**的 `ExcelMonitor_All.mq5`
+指標畫面(分頁清單)，確認正確的第12個商品是 **USDCNH**，不是 XAUUSD——已經改正。
+現在的12個是：EURUSD、GBPUSD、USDJPY、USDCAD、AUDUSD、NZDUSD、USDCHF、**USDCNH**、
+US500.cash、US30.cash、US100.cash、JP225.cash，跟 `create_excel.py` 裡
+`SYMBOLS_CONFIG` 的清單一致。
 
-已用假資料驗證跑得通：`MultiTF_Signals.csv` 輸出12列、`AllSymbols_DashboardParams.csv`
-輸出48列(12商品×4週期)，格式跟你雲端硬碟裡真實的舊輸出檔案一致。
+已用模擬報價驗證跑得通：60列(12商品×5週期)輸出正確，商品清單裡確認含 USDCNH。
 
 ## 這是什麼
 
