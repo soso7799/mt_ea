@@ -14,12 +14,20 @@ gordon_full_analysis.py 完全一致：12商品、D1/H4/H1/M15/M5共5週期，12
 32欄的欄名是我設計的(你先前答覆「沒有現成標題」)，但每一欄的數值都是直接呼叫
 gordon_full_analysis.py 裡驗證過的函式算出來，不是另外編的公式。
 
+【過期資料保護】mt5.copy_rates_from_pos() 有個已知坑：商品剛被 symbol_select()
+加進報價視窗時，終端機可能還沒同步到最新報價，這支API不會因為資料舊就報錯，
+會安靜地把本地快取裡的舊K棒當成功結果回傳。這裡加了兩層保護：抓資料前先等到
+有夠新的即時tick出現(wait_for_live_tick)；抓完資料後檢查最新一根K棒的時間，
+如果比現在舊超過(週期秒數x3)，會在終端機印出[警告]並在最後統計總共幾筆過期，
+不會悄悄放行舊資料。
+
 輸出：D:\\historical_data\\AnalysisResults.csv(跟你 VBA 巨集 RefreshAllData 的
 csvFolder 一致，csvFolder 本身不用改)。
 """
 
 import os
 import sys
+import time
 import numpy as np
 import pandas as pd
 import MetaTrader5 as mt5
@@ -47,18 +55,49 @@ CORRELATION_GROUPS = {
 MT5_TIMEFRAME_MAP = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1,
                       "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1}
 
+# 每個週期一根K棒的秒數，用來判斷抓到的資料是不是過期的
+TF_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
+STALE_MULT = 3  # 最新一根K棒的時間，如果比「現在 - N倍週期」還舊，判定為過期
+TICK_WAIT_TIMEOUT_SEC = 2.0
+STALE_LOG = []  # main()/RunDashboardUpdate 結束時用來統計、印出總共幾筆抓到過期資料
+
+
+def wait_for_live_tick(symbol, timeout=TICK_WAIT_TIMEOUT_SEC):
+    """symbol_select 剛把商品加進報價視窗時，終端機可能還沒收到第一筆即時報價，
+    這裡等到有夠新的 tick 出現才繼續，避免緊接著的 copy_rates_from_pos 抓到終端機
+    本地快取裡的舊資料（MT5 API 的已知坑：copy_rates_from_pos 不會因為資料舊就報
+    錯，會安靜地把舊資料當成功結果回傳）。等不到就直接放行，讓後面的過期檢查來抓。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        tick = mt5.symbol_info_tick(symbol)
+        if tick and tick.time and (time.time() - tick.time) < 60:
+            return True
+        time.sleep(0.2)
+    return False
+
 
 def fetch_mt5_df(symbol, tf_name, count=None):
     if count is None:
         count = gfa.OPT_LOOKBACK_BARS.get(tf_name, 2000) + 300  # 多抓一點給指標暖機用
     if not mt5.symbol_select(symbol, True):
         raise RuntimeError(f"{symbol}：券商找不到這個商品代碼，請確認 MT5 報價視窗裡的實際代號")
+    wait_for_live_tick(symbol)
     rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAME_MAP[tf_name], 0, count)
     if rates is None or len(rates) == 0:
         raise RuntimeError(f"{symbol} {tf_name}：抓不到K棒資料，{mt5.last_error()}")
     df = pd.DataFrame(rates)
     df["time"] = pd.to_datetime(df["time"], unit="s")
     df = df.rename(columns={"tick_volume": "volume"})
+
+    last_bar_age_sec = (pd.Timestamp.now() - df["time"].iloc[-1]).total_seconds()
+    max_age_sec = TF_SECONDS.get(tf_name, 900) * STALE_MULT
+    df.attrs["is_stale"] = last_bar_age_sec > max_age_sec
+    df.attrs["last_bar_age_sec"] = last_bar_age_sec
+    if df.attrs["is_stale"]:
+        STALE_LOG.append((symbol, tf_name, last_bar_age_sec))
+        print(f"[警告] {symbol} {tf_name}：抓到的最新K棒時間是 {df['time'].iloc[-1]}，"
+              f"距現在已經 {last_bar_age_sec/60:.1f} 分鐘，可能是舊資料，不是即時報價。"
+              f"請確認 MT5 該商品已訂閱報價、市場有開盤。")
     return df
 
 
@@ -151,6 +190,8 @@ def main():
         print(f"{len(errors)} 筆失敗：")
         for e in errors:
             print(" -", e)
+    if STALE_LOG:
+        print(f"[警告] 共 {len(STALE_LOG)} 筆資料疑似過期(不是即時報價)，請檢查上面的警告訊息")
     return 0
 
 

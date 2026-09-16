@@ -93,6 +93,9 @@ def main():
         for e in errors:
             print(" -", e)
 
+    if engine.STALE_LOG:
+        print(f"[警告] 共 {len(engine.STALE_LOG)} 筆資料疑似過期(不是即時報價)，請檢查上面的警告訊息")
+
     return 0
 
 
