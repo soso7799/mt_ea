@@ -21,8 +21,14 @@ gordon_full_analysis.py 裡驗證過的函式算出來，不是另外編的公�
 如果比現在舊超過(週期秒數x3)，會在終端機印出[警告]並在最後統計總共幾筆過期，
 不會悄悄放行舊資料。
 
-輸出：D:\\historical_data\\AnalysisResults.csv(跟你 VBA 巨集 RefreshAllData 的
-csvFolder 一致，csvFolder 本身不用改)。
+【輸出路徑改到非同步資料夾 - 重要修正】原本輸出到 D:\historical_data\，但這個
+資料夾被你設定成 Google 雲端硬碟自動同步(Console批次匯出視窗自己講過)。實測發現
+Python寫入成功幾小時後，Excel連FileSystemObject.FileExists都找不到那個檔案——
+檔案內容經確認完全正常，代表是雲端同步事後把本地檔案處理掉了(轉成雲端佔位符、
+或衝突時被改名/搬走)，不是Python或VBA的問題。改輸出到 D:\GordonExchange\，這個
+資料夾不在任何雲端同步範圍內，VBA 巨集的 csvFolder 也要改成一樣的路徑。
+
+輸出：D:\\GordonExchange\\AnalysisResults.csv
 """
 
 import os
@@ -34,7 +40,7 @@ import MetaTrader5 as mt5
 
 import gordon_full_analysis as gfa
 
-OUTPUT_FOLDER = r"D:\historical_data"
+OUTPUT_FOLDER = r"D:\GordonExchange"
 OUTPUT_PATH = os.path.join(OUTPUT_FOLDER, "AnalysisResults.csv")
 
 COLUMNS = [

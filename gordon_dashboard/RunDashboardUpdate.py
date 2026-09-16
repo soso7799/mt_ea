@@ -17,8 +17,8 @@ mt5.initialize()/mt5.shutdown()。如果照順序分開執行兩支，等於連�
 2. 在這個資料夾底下執行：
        python RunDashboardUpdate.py
    跑完會同時產生：
-       D:\\historical_data\\AnalysisResults.csv
-       D:\\historical_data\\LevelsResults.csv
+       D:\\GordonExchange\\AnalysisResults.csv
+       D:\\GordonExchange\\LevelsResults.csv
 3. 回到 Gordon_FTMO_監控儀表板.xlsm，按「RefreshAllData」巨集，兩個檔案都會
    一次匯入 Data / 關卡 兩個分頁。
 

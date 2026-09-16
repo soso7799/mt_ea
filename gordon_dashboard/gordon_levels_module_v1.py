@@ -14,7 +14,11 @@ gordon_levels_module_v1.py
 跟 gordon_analysis_engine_v1.py 一樣：12商品 x D1/H4/H1/M15/M5 共5週期 = 60列，
 跟「說明」分頁描述的一致。
 
-輸出：D:\\historical_data\\LevelsResults.csv
+【輸出路徑改到非同步資料夾】原因跟 gordon_analysis_engine_v1.py 開頭寫的一樣：
+D:\historical_data\ 被設定Google雲端硬碟自動同步，事後會把本地檔案處理掉，
+改輸出到不受同步影響的 D:\GordonExchange\。
+
+輸出：D:\\GordonExchange\\LevelsResults.csv
 """
 
 import os
@@ -26,7 +30,7 @@ import MetaTrader5 as mt5
 import gordon_full_analysis as gfa
 from gordon_analysis_engine_v1 import fetch_mt5_df, MT5_TIMEFRAME_MAP
 
-OUTPUT_FOLDER = r"D:\historical_data"
+OUTPUT_FOLDER = r"D:\GordonExchange"
 OUTPUT_PATH = os.path.join(OUTPUT_FOLDER, "LevelsResults.csv")
 
 COLUMNS = [
