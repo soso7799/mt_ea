@@ -12,14 +12,42 @@ input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
 
+enum ENUM_TRADE_SYMBOL
+{
+   SYM_USDJPY,
+   SYM_AUDUSD,
+   SYM_USDCAD,
+   SYM_GBPUSD,
+   SYM_EURUSD,
+   SYM_USDCHF,
+   SYM_NZDUSD,
+   SYM_JP225CASH
+};
+
+string SymbolFromEnum(ENUM_TRADE_SYMBOL e)
+{
+   switch(e)
+   {
+      case SYM_USDJPY:    return "USDJPY";
+      case SYM_AUDUSD:    return "AUDUSD";
+      case SYM_USDCAD:    return "USDCAD";
+      case SYM_GBPUSD:    return "GBPUSD";
+      case SYM_EURUSD:    return "EURUSD";
+      case SYM_USDCHF:    return "USDCHF";
+      case SYM_NZDUSD:    return "NZDUSD";
+      case SYM_JP225CASH: return "JP225.cash";
+   }
+   return "";
+}
+
 input group "=== Symbols ==="
-input string Inp_Sym1 = "USDJPY";
-input string Inp_Sym2 = "AUDUSD";
-input string Inp_Sym3 = "USDCAD";
-input string Inp_Sym4 = "GBPUSD";
-input string Inp_Sym5 = "EURUSD";
-input string Inp_Sym6 = "USDCHF";
-input string Inp_Sym7 = "NZDUSD";
+input ENUM_TRADE_SYMBOL Inp_Sym1 = SYM_USDJPY;
+input ENUM_TRADE_SYMBOL Inp_Sym2 = SYM_AUDUSD;
+input ENUM_TRADE_SYMBOL Inp_Sym3 = SYM_USDCAD;
+input ENUM_TRADE_SYMBOL Inp_Sym4 = SYM_GBPUSD;
+input ENUM_TRADE_SYMBOL Inp_Sym5 = SYM_EURUSD;
+input ENUM_TRADE_SYMBOL Inp_Sym6 = SYM_USDCHF;
+input ENUM_TRADE_SYMBOL Inp_Sym7 = SYM_NZDUSD;
 
 input group "=== Sym1 (USDJPY) ==="
 input int    S1_EMA_F=10;  input int    S1_EMA_S=30;
@@ -162,9 +190,9 @@ int OnInit()
    filter.SetMagic(Inp_Magic);
    trade.SetExpertMagicNumber(Inp_Magic);
 
-   symbols[0]=Inp_Sym1; symbols[1]=Inp_Sym2; symbols[2]=Inp_Sym3;
-   symbols[3]=Inp_Sym4; symbols[4]=Inp_Sym5; symbols[5]=Inp_Sym6;
-   symbols[6]=Inp_Sym7;
+   symbols[0]=SymbolFromEnum(Inp_Sym1); symbols[1]=SymbolFromEnum(Inp_Sym2); symbols[2]=SymbolFromEnum(Inp_Sym3);
+   symbols[3]=SymbolFromEnum(Inp_Sym4); symbols[4]=SymbolFromEnum(Inp_Sym5); symbols[5]=SymbolFromEnum(Inp_Sym6);
+   symbols[6]=SymbolFromEnum(Inp_Sym7);
 
    g_ef[0]=S1_EMA_F;   g_ef[1]=S2_EMA_F;   g_ef[2]=S3_EMA_F;   g_ef[3]=S4_EMA_F;   g_ef[4]=S5_EMA_F;   g_ef[5]=S6_EMA_F;   g_ef[6]=S7_EMA_F;
    g_es[0]=S1_EMA_S;   g_es[1]=S2_EMA_S;   g_es[2]=S3_EMA_S;   g_es[3]=S4_EMA_S;   g_es[4]=S5_EMA_S;   g_es[5]=S6_EMA_S;   g_es[6]=S7_EMA_S;
@@ -537,8 +565,8 @@ void OnTick()
    Comment(
       "MultiCurrency EA v5.2\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
-      Inp_Sym1+"/"+Inp_Sym2+"/"+Inp_Sym3+"/"+
-      Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"\n",
+      symbols[0]+"/"+symbols[1]+"/"+symbols[2]+"/"+
+      symbols[3]+"/"+symbols[4]+"/"+symbols[5]+"/"+symbols[6]+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
       filter.GetStatusReport(symbols[0])
    );
