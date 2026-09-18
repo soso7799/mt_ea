@@ -382,7 +382,14 @@ public:
    //-----------------------------------------------------------------
    void InitRules()
    {
-      ArrayResize(fx_rules, 20);
+      ArrayResize(fx_rules, 21);
+
+      // ⚠️ EURUSD 為估計值，不是像其他 20 筆一樣回測校準出來的數字——
+      // sl_pips 用同為 XXXUSD 報價、波動相近的 GBPUSD/AUDUSD/USDCAD 內插，
+      // tp_pips=2×sl_pips、atr_threshold=(2/3)×sl_pips 沿用其餘各列的固定比例，
+      // lot_size 依「每筆風險金額≈GBPUSD/AUDUSD/NZDUSD 三者的平均值」反推。
+      // 正式交易前請自行用實際回測數據覆蓋這一列。
+      fx_rules[20].symbol="EURUSD"; fx_rules[20].sl_pips=21.00; fx_rules[20].tp_pips=42.00;  fx_rules[20].atr_threshold=14.00;  fx_rules[20].lot_size=0.51;
 
       fx_rules[0].symbol="AUDJPY";  fx_rules[0].sl_pips=34.41;  fx_rules[0].tp_pips=68.82;   fx_rules[0].atr_threshold=22.94;   fx_rules[0].lot_size=0.49;
       fx_rules[1].symbol="AUDSGD";  fx_rules[1].sl_pips=22.51;  fx_rules[1].tp_pips=45.01;   fx_rules[1].atr_threshold=15.00;   fx_rules[1].lot_size=0.61;
