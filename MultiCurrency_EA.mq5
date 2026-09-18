@@ -161,6 +161,9 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(Inp_Magic);
 
+   if(!filter.InitIndicators())
+      return INIT_FAILED;
+
    symbols[0]=Inp_Sym1; symbols[1]=Inp_Sym2; symbols[2]=Inp_Sym3;
    symbols[3]=Inp_Sym4; symbols[4]=Inp_Sym5; symbols[5]=Inp_Sym6;
    symbols[6]=Inp_Sym7;
@@ -200,6 +203,8 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   filter.DeinitIndicators();
+
    for(int i=0;i<SYM_COUNT;i++)
    {
       IndicatorRelease(H[i].ef);   IndicatorRelease(H[i].es);

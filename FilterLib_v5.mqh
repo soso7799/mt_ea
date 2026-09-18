@@ -144,23 +144,16 @@ private:
       string s = sym;
       StringToUpper(s);
 
+      // 逐一比對已知的 20 個核心幣別代碼，而不是抓「第一段連續6個字母」，
+      // 否則像 "mUSDJPY" 這種帶前綴的券商命名，會先比對到錯誤的 "MUSDJP"
       for(int i=0; i<=StringLen(s)-6; i++)
       {
          string part = StringSubstr(s, i, 6);
-         bool ok = true;
-
-         for(int j=0; j<6; j++)
+         for(int k=0; k<20; k++)
          {
-            ushort ch = StringGetCharacter(part, j);
-            if(ch < 'A' || ch > 'Z')
-            {
-               ok = false;
-               break;
-            }
+            if(part == SYMBOLS[k])
+               return part;
          }
-
-         if(ok)
-            return part;
       }
 
       return s;
@@ -268,13 +261,10 @@ private:
          if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != magic) continue;
          if(HistoryDealGetString(ticket, DEAL_SYMBOL) != sym) continue;
          if(HistoryDealGetInteger(ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
+         // 只算真正被 SL 觸發平倉的單，手動平倉/反向訊號平倉即使虧損也不算「止損」
+         if(HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_SL) continue;
 
-         double pnl = HistoryDealGetDouble(ticket, DEAL_PROFIT)
-                    + HistoryDealGetDouble(ticket, DEAL_COMMISSION)
-                    + HistoryDealGetDouble(ticket, DEAL_SWAP);
-
-         if(pnl < 0.0)
-            cnt++;
+         cnt++;
       }
       return cnt;
    }
@@ -601,9 +591,27 @@ public:
    void CheckDailyReset()
    {
       MqlDateTime now = LocalNow();
+      bool past = (now.hour > TradingStartHour || (now.hour == TradingStartHour && now.min >= TradingStartMin));
 
       if(lastResetDay == 0)
       {
+         // EA/終端機重啟時，若已過當日交易起始時間，視為需要重置，
+         // 避免沿用重啟前殘留的全局鎖（否則要等到隔天才會解鎖）
+         if(past)
+         {
+            if(GlobalVariableCheck("PRO_DAY_LOCK"))
+               GlobalVariableDel("PRO_DAY_LOCK");
+
+            for(int i=SymbolsTotal(true)-1; i>=0; i--)
+            {
+               string s = SymbolName(i, true);
+               string key = "PRO_LOCK_" + s;
+               if(GlobalVariableCheck(key))
+                  GlobalVariableDel(key);
+            }
+            Print("✅ 啟動時重置完成");
+         }
+
          lastResetDay = TimeLocal();
          return;
       }
@@ -612,7 +620,6 @@ public:
       TimeToStruct(lastResetDay, last);
 
       bool newDay = (now.year != last.year || now.mon != last.mon || now.day != last.day);
-      bool past   = (now.hour > TradingStartHour || (now.hour == TradingStartHour && now.min >= TradingStartMin));
 
       if(newDay && past)
       {
@@ -638,7 +645,12 @@ public:
       if(forceClosedToday) return;
 
       MqlDateTime t = LocalNow();
-      if(t.hour == ForceCloseHour && t.min >= ForceCloseMin)
+      int nowMin   = t.hour * 60 + t.min;
+      int closeMin = ForceCloseHour * 60 + ForceCloseMin;
+
+      // 用「分鐘數是否已過強平時間」取代「小時剛好相等」，
+      // 避免錯過該小時內唯一一次 tick 就導致當天永遠不強平
+      if(nowMin >= closeMin)
       {
          CloseAll("05:50強平");
          forceClosedToday = true;
@@ -673,15 +685,20 @@ public:
       ArraySetAsSeries(closeBuf, true);
 
       int bars = 30;
-      CopyHigh(sym, PERIOD_M12, 1, bars, highBuf);
-      CopyLow(sym, PERIOD_M12, 1, bars, lowBuf);
-      CopyOpen(sym, PERIOD_M12, 1, bars, openBuf);
-      CopyClose(sym, PERIOD_M12, 1, bars, closeBuf);
+      int gotHigh  = CopyHigh(sym, PERIOD_M12, 1, bars, highBuf);
+      int gotLow   = CopyLow(sym, PERIOD_M12, 1, bars, lowBuf);
+      int gotOpen  = CopyOpen(sym, PERIOD_M12, 1, bars, openBuf);
+      int gotClose = CopyClose(sym, PERIOD_M12, 1, bars, closeBuf);
+
+      // 剛訂閱/歷史資料尚未補齊時，Copy* 可能回傳少於 bars 根，
+      // 迴圈只能掃到實際回傳的最小根數，避免陣列越界
+      int available = MathMin(MathMin(gotHigh, gotLow), MathMin(gotOpen, gotClose));
+      if(available < 0) available = 0;
 
       int    validCount = 0;
       double swingLevel = 0.0;
 
-      for(int i=0; i<bars && validCount<MaxSwingBars; i++)
+      for(int i=0; i<available && validCount<MaxSwingBars; i++)
       {
          double bodyPips = MathAbs(closeBuf[i] - openBuf[i]) / pip;
          if(bodyPips < MinBarBodyPips) continue;
