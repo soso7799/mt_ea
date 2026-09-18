@@ -71,7 +71,7 @@ input int    S7_MF=10;    input int    S7_MS=24;      input int S7_MSig=7;
 input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 
 //------------------------------------------------------------------
-CFilterLib_Pro filter(0);
+CFilterLib_Pro filter(Inp_Magic);
 CTrade         trade;
 
 #define SYM_COUNT 7
@@ -159,8 +159,10 @@ double GetAtrPips(int si)
 //------------------------------------------------------------------
 int OnInit()
 {
-   filter.SetMagic(Inp_Magic);
    trade.SetExpertMagicNumber(Inp_Magic);
+
+   if(!filter.InitIndicators())
+      return INIT_FAILED;
 
    symbols[0]=Inp_Sym1; symbols[1]=Inp_Sym2; symbols[2]=Inp_Sym3;
    symbols[3]=Inp_Sym4; symbols[4]=Inp_Sym5; symbols[5]=Inp_Sym6;
@@ -201,6 +203,8 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   filter.DeinitIndicators();
+
    for(int i=0;i<SYM_COUNT;i++)
    {
       IndicatorRelease(H[i].ef);   IndicatorRelease(H[i].es);
@@ -505,11 +509,15 @@ void TryOpenPositions()
    string sym = symbols[bestIndex];
    int sig    = sigArr[bestIndex];
 
-   // ★ 由 FilterLib 統一決定是否允許開倉，並提供 SL/TP
-   double sl=0, tp=0;
+   // ★ 持倉上限由 EA 自行控制（FilterLib_v5.mqh 的 AllowTrading 不含此參數）
    int curRiskPos = CountPos(); // 用 magic 計算較準（PositionsTotal()會含其他EA/手動單）
+   if(curRiskPos >= Inp_MaxPos)
+      return;
 
-   if(!filter.AllowTrading(sym, sig, sl, tp, curRiskPos, Inp_MaxPos))
+   // ★ 其餘開倉條件與 SL/TP 由 FilterLib 統一決定
+   double sl=0, tp=0;
+
+   if(!filter.AllowTrading(sym, sig, sl, tp))
       return;
    double lot = filter.GetLotSize(sym);
 
