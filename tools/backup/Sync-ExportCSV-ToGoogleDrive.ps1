@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Mirrors a local export folder into a Google Drive for Desktop mounted drive letter.
 
@@ -9,17 +9,18 @@
     (e.g. G:\ExportCSV). Google Drive for Desktop then uploads/syncs that folder to
     the cloud on its own; this script only handles the local-to-local copy.
 
-    Pass -Source and -Destination explicitly (no defaults) so this script file stays
-    plain ASCII and works regardless of the system code page - put any non-ASCII
-    path (e.g. Chinese folder names) on the command line / Task Scheduler action
-    instead of inside this file.
+    -Source and -Destination default to this user's actual paths below; override
+    them on the command line if you copy this script for a different setup. This
+    file is saved as UTF-8 with a BOM so PowerShell reads the Chinese path
+    correctly regardless of the system's regional code page.
 
 .PARAMETER Source
-    Folder to copy from. Must already exist.
+    Folder to copy from. Must already exist. Default: D:\資料查詢\ExportCSV
 
 .PARAMETER Destination
     Folder to copy into. Created if missing. Should live under a mounted Google
     Drive for Desktop drive letter so Google Drive picks up the changes.
+    Default: G:\ExportCSV
 
 .PARAMETER LogDir
     Where to write per-run logs. Defaults to a "logs" folder next to this script.
@@ -28,22 +29,20 @@
     Log files older than this many days are deleted after each run. Default 30.
 
 .EXAMPLE
-    powershell.exe -ExecutionPolicy Bypass -File Sync-ExportCSV-ToGoogleDrive.ps1 `
-        -Source "D:\ExportCSV" -Destination "G:\ExportCSV"
+    # Uses the defaults above - no arguments needed:
+    powershell.exe -ExecutionPolicy Bypass -File Sync-ExportCSV-ToGoogleDrive.ps1
 
 .EXAMPLE
-    # Task Scheduler action (Program/script + Arguments):
-    #   powershell.exe
-    #   -ExecutionPolicy Bypass -File "C:\path\to\Sync-ExportCSV-ToGoogleDrive.ps1" -Source "D:\..." -Destination "G:\..."
+    # Override the defaults for a different setup:
+    powershell.exe -ExecutionPolicy Bypass -File Sync-ExportCSV-ToGoogleDrive.ps1 `
+        -Source "D:\OtherFolder" -Destination "H:\OtherFolder"
 #>
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Source,
+    [string]$Source = "D:\資料查詢\ExportCSV",
 
-    [Parameter(Mandatory = $true)]
-    [string]$Destination,
+    [string]$Destination = "G:\ExportCSV",
 
     [string]$LogDir = (Join-Path $PSScriptRoot "logs"),
 

@@ -12,8 +12,9 @@
 
 直接雙擊 `一鍵同步到GoogleDrive.bat` 這個檔案，不用開 PowerShell、不用打任何指令。
 
-- 它裡面已經寫死路徑：`D:\資料查詢\ExportCSV` → `G:\ExportCSV`。如果您的路徑不是這兩個，
-  用記事本打開 `一鍵同步到GoogleDrive.bat`，把裡面的 `-Source` 和 `-Destination` 後面的路徑改成您實際的路徑即可。
+- 預設路徑是 `D:\資料查詢\ExportCSV` → `G:\ExportCSV`，這兩個路徑寫在 `Sync-ExportCSV-ToGoogleDrive.ps1`
+  檔案最上面的 `$Source` / `$Destination`。如果您的路徑不是這兩個，用記事本打開 `.ps1` 檔修改那兩行即可
+  （`.bat` 檔本身不用改，也刻意不放中文字，避免某些電腦的中文編碼設定造成亂碼、指令跑不動）。
 - 跑完視窗會停住顯示結果，按任意鍵才會關閉，方便您確認有沒有錯誤。
 - 之後要排程自動執行，也是排程去執行這個 `.bat` 檔就好（見下方「設定排程」，動作改成直接指向這個 `.bat` 檔，不用再填 PowerShell 引數）。
 
