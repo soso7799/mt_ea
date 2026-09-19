@@ -8,7 +8,16 @@
 - 已安裝 Google Drive 電腦版，並掛載成某個磁碟機代號（例如 `G:\`）。
 - 本機有一個持續產生 CSV 的來源資料夾（例如 `D:\資料查詢\ExportCSV`）。
 
-## 手動測試一次
+## 最簡單的用法：雙擊執行
+
+直接雙擊 `一鍵同步到GoogleDrive.bat` 這個檔案，不用開 PowerShell、不用打任何指令。
+
+- 它裡面已經寫死路徑：`D:\資料查詢\ExportCSV` → `G:\ExportCSV`。如果您的路徑不是這兩個，
+  用記事本打開 `一鍵同步到GoogleDrive.bat`，把裡面的 `-Source` 和 `-Destination` 後面的路徑改成您實際的路徑即可。
+- 跑完視窗會停住顯示結果，按任意鍵才會關閉，方便您確認有沒有錯誤。
+- 之後要排程自動執行，也是排程去執行這個 `.bat` 檔就好（見下方「設定排程」，動作改成直接指向這個 `.bat` 檔，不用再填 PowerShell 引數）。
+
+## 手動測試一次（進階，用 PowerShell 直接下指令）
 
 用系統管理員或一般權限開 PowerShell，執行：
 
@@ -29,11 +38,7 @@ powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\tools\backup\Sync-Expor
 1. 開「工作排程器」(Task Scheduler) → 建立工作。
 2. 觸發程序：例如「登入時」+「每隔 15 分鐘重複一次，持續 1 天」。
 3. 動作：
-   - 程式/指令碼：`powershell.exe`
-   - 新增引數：
-     ```
-     -ExecutionPolicy Bypass -File "C:\path\to\tools\backup\Sync-ExportCSV-ToGoogleDrive.ps1" -Source "D:\資料查詢\ExportCSV" -Destination "G:\ExportCSV"
-     ```
+   - 程式/指令碼：直接瀏覽選取 `一鍵同步到GoogleDrive.bat` 這個檔案（不用填任何引數）。
 4. 建議勾選「不論使用者是否登入均執行」時，確認 Google Drive 電腦版本身也有在該帳號下自動啟動，否則 `G:\` 磁碟機可能還沒掛載，腳本會因為找不到路徑而失敗。
 
 ## 關於 4 個 Google 帳號 / 每個 15GB
