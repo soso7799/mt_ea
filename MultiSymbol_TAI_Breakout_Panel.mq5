@@ -64,7 +64,9 @@ input int    Inp_ArrowOffsetPoints = 30;
 input bool   Inp_EnableAlert       = true;
 
 input group "=== 關卡水平線 ==="
-input bool   Inp_ShowLevelLines  = true;
+// 預設關閉：你已經有 YesterdayHiL_Autoadjust 在畫同樣的水平線，
+// 兩個一起開會疊線。如果某些圖表沒裝那支，可以自己開這裡當替代。
+input bool   Inp_ShowLevelLines  = false;
 input int    Inp_LineRefreshSec  = 60;
 input color  Inp_ColorPrevHigh   = clrRed;
 input color  Inp_ColorPrevLow    = clrRed;
