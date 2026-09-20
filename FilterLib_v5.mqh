@@ -12,7 +12,7 @@
 // 支援幣別
 //--------------------------------------------------------------------
 const string SYMBOLS[20] = {
-   
+
    "AUDJPY",
    "AUDSGD",
    "AUDUSD",
@@ -144,16 +144,23 @@ private:
       string s = sym;
       StringToUpper(s);
 
-      // 逐一比對已知的 20 個核心幣別代碼，而不是抓「第一段連續6個字母」，
-      // 否則像 "mUSDJPY" 這種帶前綴的券商命名，會先比對到錯誤的 "MUSDJP"
       for(int i=0; i<=StringLen(s)-6; i++)
       {
          string part = StringSubstr(s, i, 6);
-         for(int k=0; k<20; k++)
+         bool ok = true;
+
+         for(int j=0; j<6; j++)
          {
-            if(part == SYMBOLS[k])
-               return part;
+            ushort ch = StringGetCharacter(part, j);
+            if(ch < 'A' || ch > 'Z')
+            {
+               ok = false;
+               break;
+            }
          }
+
+         if(ok)
+            return part;
       }
 
       return s;
@@ -261,10 +268,13 @@ private:
          if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != magic) continue;
          if(HistoryDealGetString(ticket, DEAL_SYMBOL) != sym) continue;
          if(HistoryDealGetInteger(ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
-         // 只算真正被 SL 觸發平倉的單，手動平倉/反向訊號平倉即使虧損也不算「止損」
-         if(HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_SL) continue;
 
-         cnt++;
+         double pnl = HistoryDealGetDouble(ticket, DEAL_PROFIT)
+                    + HistoryDealGetDouble(ticket, DEAL_COMMISSION)
+                    + HistoryDealGetDouble(ticket, DEAL_SWAP);
+
+         if(pnl < 0.0)
+            cnt++;
       }
       return cnt;
    }
@@ -384,35 +394,6 @@ public:
    {
       ArrayResize(fx_rules, 25);
 
-      // ⚠️⚠️⚠️ PLACEHOLDER — 以下 4 筆指數 CFD 規則完全沒有經過回測校準 ⚠️⚠️⚠️
-      // SL/TP/ATR門檻是保守估計值，lot_size 固定用最小 0.01，
-      // 純粹是為了讓 US100.cash/US500.cash/US30.cash/JP225.cash 能被 FindRule()
-      // 正確辨識、可以下單而不是直接被 AllowTrading() 擋掉。
-      // 正式交易前，務必用實際回測數據（backtest_session_breakout.py 或其他）
-      // 覆蓋這 4 筆的 sl_pips / tp_pips / atr_threshold / lot_size。
-      // symbol 欄位要跟 GetCoreSymbol() 轉大寫後的broker代碼完全一致
-      // （broker 若用 "US100.cash" 這種寫法，轉大寫後會是 "US100.CASH"）。
-      //
-      // ⚠️ 重要：PipSize() 是為外匯設計的（2/3位小數→0.01，其餘→0.0001），
-      // 底下 sl_pips/tp_pips/atr_threshold 是「假設這幾個指數 SYMBOL_DIGITS=2
-      // （即 PipSize=0.01）」反推出來的點數，換算成實際價格距離大約是：
-      // US100.cash ≈80點、US500.cash ≈25點、US30.cash ≈150點、JP225.cash ≈180點。
-      // 如果你的 broker 這幾個商品的小數位數不是2位，這組數字會整個跑掉
-      // （例如變成離現價幾百倍遠或近到瞬間停損），上線前務必先用
-      // Print(SymbolInfoInteger("US100.cash",SYMBOL_DIGITS)) 之類的方式
-      // 確認實際小數位數，再校正這裡的數字。
-      fx_rules[21].symbol="US100.CASH"; fx_rules[21].sl_pips=8000.00;  fx_rules[21].tp_pips=16000.00; fx_rules[21].atr_threshold=6000.00;  fx_rules[21].lot_size=0.01;
-      fx_rules[22].symbol="US500.CASH"; fx_rules[22].sl_pips=2500.00;  fx_rules[22].tp_pips=5000.00;  fx_rules[22].atr_threshold=1800.00;  fx_rules[22].lot_size=0.01;
-      fx_rules[23].symbol="US30.CASH";  fx_rules[23].sl_pips=15000.00; fx_rules[23].tp_pips=30000.00; fx_rules[23].atr_threshold=11000.00; fx_rules[23].lot_size=0.01;
-      fx_rules[24].symbol="JP225.CASH"; fx_rules[24].sl_pips=18000.00; fx_rules[24].tp_pips=36000.00; fx_rules[24].atr_threshold=13000.00; fx_rules[24].lot_size=0.01;
-
-      // ⚠️ EURUSD 為估計值，不是像其他 20 筆一樣回測校準出來的數字——
-      // sl_pips 用同為 XXXUSD 報價、波動相近的 GBPUSD/AUDUSD/USDCAD 內插，
-      // tp_pips=2×sl_pips、atr_threshold=(2/3)×sl_pips 沿用其餘各列的固定比例，
-      // lot_size 依「每筆風險金額≈GBPUSD/AUDUSD/NZDUSD 三者的平均值」反推。
-      // 正式交易前請自行用實際回測數據覆蓋這一列。
-      fx_rules[20].symbol="EURUSD"; fx_rules[20].sl_pips=21.00; fx_rules[20].tp_pips=42.00;  fx_rules[20].atr_threshold=14.00;  fx_rules[20].lot_size=0.51;
-
       fx_rules[0].symbol="AUDJPY";  fx_rules[0].sl_pips=34.41;  fx_rules[0].tp_pips=68.82;   fx_rules[0].atr_threshold=22.94;   fx_rules[0].lot_size=0.49;
       fx_rules[1].symbol="AUDSGD";  fx_rules[1].sl_pips=22.51;  fx_rules[1].tp_pips=45.01;   fx_rules[1].atr_threshold=15.00;   fx_rules[1].lot_size=0.61;
       fx_rules[2].symbol="AUDUSD";  fx_rules[2].sl_pips=22.68;  fx_rules[2].tp_pips=45.36;   fx_rules[2].atr_threshold=15.12;   fx_rules[2].lot_size=0.48;
@@ -433,6 +414,38 @@ public:
       fx_rules[17].symbol="USDJPY"; fx_rules[17].sl_pips=36.01; fx_rules[17].tp_pips=72.02;  fx_rules[17].atr_threshold=24.01;  fx_rules[17].lot_size=0.48;
       fx_rules[18].symbol="USDMXN"; fx_rules[18].sl_pips=543.57;fx_rules[18].tp_pips=1087.15;fx_rules[18].atr_threshold=362.38; fx_rules[18].lot_size=0.37;
       fx_rules[19].symbol="USDTRY"; fx_rules[19].sl_pips=544.20;fx_rules[19].tp_pips=1088.39;fx_rules[19].atr_threshold=362.80; fx_rules[19].lot_size=1.07;
+
+      // ⚠️ EURUSD 為估計值，不是像上面 20 筆一樣回測校準出來的數字——
+      // sl_pips 用同為 XXXUSD 報價、波動相近的 GBPUSD/AUDUSD/USDCAD 內插，
+      // tp_pips=2×sl_pips、atr_threshold=(2/3)×sl_pips 沿用其餘各列的固定比例，
+      // lot_size 依「每筆風險金額≈GBPUSD/AUDUSD/NZDUSD 三者的平均值」反推。
+      // MultiCurrency_EA.mq5 的 Inp_Sym5 預設就是 EURUSD，在補上這筆之前
+      // FindRule("EURUSD") 永遠找不到，AllowTrading() 會一路回傳 false，
+      // 等於 EURUSD 完全沒在下單，只是背景空轉。
+      // 正式交易前請自行用實際回測數據覆蓋這一列。
+      fx_rules[20].symbol="EURUSD"; fx_rules[20].sl_pips=21.00; fx_rules[20].tp_pips=42.00;  fx_rules[20].atr_threshold=14.00;  fx_rules[20].lot_size=0.51;
+
+      // ⚠️⚠️⚠️ PLACEHOLDER — 以下 4 筆指數 CFD 規則完全沒有經過回測校準 ⚠️⚠️⚠️
+      // SL/TP/ATR門檻是保守估計值，lot_size 固定用最小 0.01，
+      // 純粹是為了讓 US100.cash/US500.cash/US30.cash/JP225.cash 能被 FindRule()
+      // 正確辨識、可以下單而不是直接被 AllowTrading() 擋掉。
+      // 正式交易前，務必用實際回測數據覆蓋這 4 筆的
+      // sl_pips / tp_pips / atr_threshold / lot_size。
+      // symbol 欄位要跟 GetCoreSymbol() 轉大寫後的broker代碼完全一致
+      // （broker 若用 "US100.cash" 這種寫法，轉大寫後會是 "US100.CASH"）。
+      //
+      // ⚠️ 重要：PipSize() 是為外匯設計的（2/3位小數→0.01，其餘→0.0001），
+      // 底下 sl_pips/tp_pips/atr_threshold 是「假設這幾個指數 SYMBOL_DIGITS=2
+      // （即 PipSize=0.01）」反推出來的點數，換算成實際價格距離大約是：
+      // US100.cash ≈80點、US500.cash ≈25點、US30.cash ≈150點、JP225.cash ≈180點。
+      // 如果你的 broker 這幾個商品的小數位數不是2位，這組數字會整個跑掉
+      // （例如變成離現價幾百倍遠或近到瞬間停損），上線前務必先用
+      // Print(SymbolInfoInteger("US100.cash",SYMBOL_DIGITS)) 之類的方式
+      // 確認實際小數位數，再校正這裡的數字。
+      fx_rules[21].symbol="US100.CASH"; fx_rules[21].sl_pips=8000.00;  fx_rules[21].tp_pips=16000.00; fx_rules[21].atr_threshold=6000.00;  fx_rules[21].lot_size=0.01;
+      fx_rules[22].symbol="US500.CASH"; fx_rules[22].sl_pips=2500.00;  fx_rules[22].tp_pips=5000.00;  fx_rules[22].atr_threshold=1800.00;  fx_rules[22].lot_size=0.01;
+      fx_rules[23].symbol="US30.CASH";  fx_rules[23].sl_pips=15000.00; fx_rules[23].tp_pips=30000.00; fx_rules[23].atr_threshold=11000.00; fx_rules[23].lot_size=0.01;
+      fx_rules[24].symbol="JP225.CASH"; fx_rules[24].sl_pips=18000.00; fx_rules[24].tp_pips=36000.00; fx_rules[24].atr_threshold=13000.00; fx_rules[24].lot_size=0.01;
    }
 
    bool ApplyRuleBySymbol(string chart_symbol)
@@ -620,27 +633,9 @@ public:
    void CheckDailyReset()
    {
       MqlDateTime now = LocalNow();
-      bool past = (now.hour > TradingStartHour || (now.hour == TradingStartHour && now.min >= TradingStartMin));
 
       if(lastResetDay == 0)
       {
-         // EA/終端機重啟時，若已過當日交易起始時間，視為需要重置，
-         // 避免沿用重啟前殘留的全局鎖（否則要等到隔天才會解鎖）
-         if(past)
-         {
-            if(GlobalVariableCheck("PRO_DAY_LOCK"))
-               GlobalVariableDel("PRO_DAY_LOCK");
-
-            for(int i=SymbolsTotal(true)-1; i>=0; i--)
-            {
-               string s = SymbolName(i, true);
-               string key = "PRO_LOCK_" + s;
-               if(GlobalVariableCheck(key))
-                  GlobalVariableDel(key);
-            }
-            Print("✅ 啟動時重置完成");
-         }
-
          lastResetDay = TimeLocal();
          return;
       }
@@ -649,6 +644,7 @@ public:
       TimeToStruct(lastResetDay, last);
 
       bool newDay = (now.year != last.year || now.mon != last.mon || now.day != last.day);
+      bool past   = (now.hour > TradingStartHour || (now.hour == TradingStartHour && now.min >= TradingStartMin));
 
       if(newDay && past)
       {
@@ -674,12 +670,7 @@ public:
       if(forceClosedToday) return;
 
       MqlDateTime t = LocalNow();
-      int nowMin   = t.hour * 60 + t.min;
-      int closeMin = ForceCloseHour * 60 + ForceCloseMin;
-
-      // 用「分鐘數是否已過強平時間」取代「小時剛好相等」，
-      // 避免錯過該小時內唯一一次 tick 就導致當天永遠不強平
-      if(nowMin >= closeMin)
+      if(t.hour == ForceCloseHour && t.min >= ForceCloseMin)
       {
          CloseAll("05:50強平");
          forceClosedToday = true;
@@ -714,20 +705,15 @@ public:
       ArraySetAsSeries(closeBuf, true);
 
       int bars = 30;
-      int gotHigh  = CopyHigh(sym, PERIOD_M12, 1, bars, highBuf);
-      int gotLow   = CopyLow(sym, PERIOD_M12, 1, bars, lowBuf);
-      int gotOpen  = CopyOpen(sym, PERIOD_M12, 1, bars, openBuf);
-      int gotClose = CopyClose(sym, PERIOD_M12, 1, bars, closeBuf);
-
-      // 剛訂閱/歷史資料尚未補齊時，Copy* 可能回傳少於 bars 根，
-      // 迴圈只能掃到實際回傳的最小根數，避免陣列越界
-      int available = MathMin(MathMin(gotHigh, gotLow), MathMin(gotOpen, gotClose));
-      if(available < 0) available = 0;
+      CopyHigh(sym, PERIOD_M12, 1, bars, highBuf);
+      CopyLow(sym, PERIOD_M12, 1, bars, lowBuf);
+      CopyOpen(sym, PERIOD_M12, 1, bars, openBuf);
+      CopyClose(sym, PERIOD_M12, 1, bars, closeBuf);
 
       int    validCount = 0;
       double swingLevel = 0.0;
 
-      for(int i=0; i<available && validCount<MaxSwingBars; i++)
+      for(int i=0; i<bars && validCount<MaxSwingBars; i++)
       {
          double bodyPips = MathAbs(closeBuf[i] - openBuf[i]) / pip;
          if(bodyPips < MinBarBodyPips) continue;

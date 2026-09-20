@@ -492,15 +492,15 @@ void GetSignalWithConfirm(int si, int &sig, int &confirm)
 
 void TryOpenPositions()
 {
-  
-  
+
+
    int sigArr[SYM_COUNT];
    int confArr[SYM_COUNT];
 
    // ===== 第一階段：收集信號 =====
    for(int i=0;i<SYM_COUNT;i++)
    {
-     
+
       sigArr[i] = 0;
       confArr[i] = 0;
 
