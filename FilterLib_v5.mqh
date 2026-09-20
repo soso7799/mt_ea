@@ -511,6 +511,14 @@ public:
    //-----------------------------------------------------------------
    bool InitIndicators()
    {
+      // 這 20 個代碼只是給 F段（反向訊號自動平倉的 background 監控）用的，
+      // 跟 EA 實際交易的 Inp_Sym1~N 是分開的兩件事。
+      // broker 不一定 20 個都有（例如 AUDSGD/NOKJPY/NOKSEK/SEKJPY 這類冷門
+      // 交叉盤在部分 broker 不存在），單一代碼建立失敗不該讓整個 EA
+      // 初始化失敗——只跳過該代碼（handle 維持 INVALID_HANDLE，
+      // _calcSignalShift() 對該代碼會自動回傳 SIG_NONE，不影響其他代碼）。
+      bool anyFailed = false;
+
       for(int i=0; i<20; i++)
       {
          string sym = SYMBOLS[i];
@@ -530,12 +538,17 @@ public:
             m_hRSI[i]     == INVALID_HANDLE || m_hBB[i]      == INVALID_HANDLE ||
             m_hMACD[i]    == INVALID_HANDLE || m_hStoch[i]   == INVALID_HANDLE)
          {
-            PrintFormat("FilterLib v5: handle建立失敗 %s (err=%d)", sym, GetLastError());
-            return false;
+            PrintFormat("FilterLib v5: %s 無法建立handle (err=%d)，跳過此代碼的F段監控（不影響其他商品/主要交易邏輯）", sym, GetLastError());
+            anyFailed = true;
+            continue;
          }
       }
 
-      Print("FilterLib v5: 全部指標handle建立完成");
+      if(anyFailed)
+         Print("FilterLib v5: 部分代碼的F段監控handle建立失敗（見上方訊息），已跳過，其餘代碼正常");
+      else
+         Print("FilterLib v5: 全部指標handle建立完成");
+
       return true;
    }
 
