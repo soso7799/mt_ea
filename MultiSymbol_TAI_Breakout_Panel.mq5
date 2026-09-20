@@ -49,7 +49,7 @@ input int    Inp_AtrPeriod     = 14;
 input double Inp_AtrMultiplier = 1.0;
 
 input group "=== 面板 ==="
-input int    Inp_RefreshSeconds = 15;
+input int    Inp_RefreshSeconds = 300; // 5分鐘
 input int    Inp_FontSize       = 9;
 input string Inp_FontName       = "Microsoft JhengHei";
 input int    Inp_PanelX         = 10;
