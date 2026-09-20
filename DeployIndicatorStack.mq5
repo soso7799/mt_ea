@@ -142,6 +142,13 @@ void DeployToChart(const long chart)
       int h = iCustom(sym, tf, "Trendline_Signal_Indicator_MT5");
       AddChartWindowIndicator(chart, sym, tf, "Trendline_Signal_Indicator_MT5", h);
    }
+   // 附圖順序比照你截圖的既有配置：附圖1=ExcelMonitor_VolumePanel，附圖2=TAI_Color_Panel_Optimized
+   // （ChartIndicatorAdd 用 CHART_WINDOWS_TOTAL 當目標視窗編號，先加的會排在前面的視窗）
+   if(Inp_IncludeVolumePanel)
+   {
+      int h = iCustom(sym, tf, "ExcelMonitor_VolumePanel");
+      AddSubWindowIndicator(chart, sym, "ExcelMonitor_VolumePanel", h);
+   }
    if(Inp_IncludeTAI)
    {
       int h = iCustom(sym, tf, "TAI_Color_Panel_Optimized",
@@ -149,11 +156,6 @@ void DeployToChart(const long chart)
                        Inp_TAI_ResponseBoost, Inp_TAI_FlPeriod, Inp_TAI_FlLevelUp, Inp_TAI_FlLevelDown,
                        Inp_TAI_AtrPeriod, Inp_TAI_AtrMultiplier, Inp_TAI_ClosedBarState);
       AddSubWindowIndicator(chart, sym, "TAI_Color_Panel_Optimized", h);
-   }
-   if(Inp_IncludeVolumePanel)
-   {
-      int h = iCustom(sym, tf, "ExcelMonitor_VolumePanel");
-      AddSubWindowIndicator(chart, sym, "ExcelMonitor_VolumePanel", h);
    }
    if(Inp_IncludeRemainingTime)
    {
