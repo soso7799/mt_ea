@@ -20,6 +20,10 @@ input string Inp_Sym4 = "GBPUSD";
 input string Inp_Sym5 = "EURUSD";
 input string Inp_Sym6 = "USDCHF";
 input string Inp_Sym7 = "NZDUSD";
+input string Inp_Sym8 = "US100.cash";
+input string Inp_Sym9 = "US500.cash";
+input string Inp_Sym10 = "US30.cash";
+input string Inp_Sym11 = "JP225.cash";
 
 input group "=== Sym1 (USDJPY) ==="
 input int    S1_EMA_F=10;  input int    S1_EMA_S=30;
@@ -70,11 +74,41 @@ input int    S7_BB_P=18;  input double S7_BB_Std=2.0;
 input int    S7_MF=10;    input int    S7_MS=24;      input int S7_MSig=7;
 input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 
+// ⚠️ PLACEHOLDER — Sym8~11（指數CFD）以下參數是通用預設值，未針對 M12週期
+// 回測校準過，僅供先觀察/跑起來用，正式交易前請自行優化。
+input group "=== Sym8 (US100.cash) ==="
+input int    S8_EMA_F=9;  input int    S8_EMA_S=26;
+input int    S8_RSI_P=14; input int    S8_RSI_OS=35; input int S8_RSI_OB=65;
+input int    S8_BB_P=20;  input double S8_BB_Std=2.0;
+input int    S8_MF=12;    input int    S8_MS=26;      input int S8_MSig=9;
+input int    S8_KP=9;     input int    S8_KK=3;       input int S8_KD=3;
+
+input group "=== Sym9 (US500.cash) ==="
+input int    S9_EMA_F=9;  input int    S9_EMA_S=26;
+input int    S9_RSI_P=14; input int    S9_RSI_OS=35; input int S9_RSI_OB=65;
+input int    S9_BB_P=20;  input double S9_BB_Std=2.0;
+input int    S9_MF=12;    input int    S9_MS=26;      input int S9_MSig=9;
+input int    S9_KP=9;     input int    S9_KK=3;       input int S9_KD=3;
+
+input group "=== Sym10 (US30.cash) ==="
+input int    S10_EMA_F=9;  input int    S10_EMA_S=26;
+input int    S10_RSI_P=14; input int    S10_RSI_OS=35; input int S10_RSI_OB=65;
+input int    S10_BB_P=20;  input double S10_BB_Std=2.0;
+input int    S10_MF=12;    input int    S10_MS=26;      input int S10_MSig=9;
+input int    S10_KP=9;     input int    S10_KK=3;       input int S10_KD=3;
+
+input group "=== Sym11 (JP225.cash) ==="
+input int    S11_EMA_F=9;  input int    S11_EMA_S=26;
+input int    S11_RSI_P=14; input int    S11_RSI_OS=35; input int S11_RSI_OB=65;
+input int    S11_BB_P=20;  input double S11_BB_Std=2.0;
+input int    S11_MF=12;    input int    S11_MS=26;      input int S11_MSig=9;
+input int    S11_KP=9;     input int    S11_KK=3;       input int S11_KD=3;
+
 //------------------------------------------------------------------
 CFilterLib_Pro filter(Inp_Magic);
 CTrade         trade;
 
-#define SYM_COUNT 7
+#define SYM_COUNT 11
 #define IND_COUNT 5
 int weight[IND_COUNT] = {3,2,1,2,1};
 
@@ -166,21 +200,22 @@ int OnInit()
 
    symbols[0]=Inp_Sym1; symbols[1]=Inp_Sym2; symbols[2]=Inp_Sym3;
    symbols[3]=Inp_Sym4; symbols[4]=Inp_Sym5; symbols[5]=Inp_Sym6;
-   symbols[6]=Inp_Sym7;
+   symbols[6]=Inp_Sym7; symbols[7]=Inp_Sym8; symbols[8]=Inp_Sym9;
+   symbols[9]=Inp_Sym10; symbols[10]=Inp_Sym11;
 
-   g_ef[0]=S1_EMA_F;   g_ef[1]=S2_EMA_F;   g_ef[2]=S3_EMA_F;   g_ef[3]=S4_EMA_F;   g_ef[4]=S5_EMA_F;   g_ef[5]=S6_EMA_F;   g_ef[6]=S7_EMA_F;
-   g_es[0]=S1_EMA_S;   g_es[1]=S2_EMA_S;   g_es[2]=S3_EMA_S;   g_es[3]=S4_EMA_S;   g_es[4]=S5_EMA_S;   g_es[5]=S6_EMA_S;   g_es[6]=S7_EMA_S;
-   g_rp[0]=S1_RSI_P;   g_rp[1]=S2_RSI_P;   g_rp[2]=S3_RSI_P;   g_rp[3]=S4_RSI_P;   g_rp[4]=S5_RSI_P;   g_rp[5]=S6_RSI_P;   g_rp[6]=S7_RSI_P;
-   g_bp[0]=S1_BB_P;    g_bp[1]=S2_BB_P;    g_bp[2]=S3_BB_P;    g_bp[3]=S4_BB_P;    g_bp[4]=S5_BB_P;    g_bp[5]=S6_BB_P;    g_bp[6]=S7_BB_P;
-   g_bs[0]=S1_BB_Std;  g_bs[1]=S2_BB_Std;  g_bs[2]=S3_BB_Std;  g_bs[3]=S4_BB_Std;  g_bs[4]=S5_BB_Std;  g_bs[5]=S6_BB_Std;  g_bs[6]=S7_BB_Std;
-   g_mf[0]=S1_MF;      g_mf[1]=S2_MF;      g_mf[2]=S3_MF;      g_mf[3]=S4_MF;      g_mf[4]=S5_MF;      g_mf[5]=S6_MF;      g_mf[6]=S7_MF;
-   g_ms[0]=S1_MS;      g_ms[1]=S2_MS;      g_ms[2]=S3_MS;      g_ms[3]=S4_MS;      g_ms[4]=S5_MS;      g_ms[5]=S6_MS;      g_ms[6]=S7_MS;
-   g_mg[0]=S1_MSig;    g_mg[1]=S2_MSig;    g_mg[2]=S3_MSig;    g_mg[3]=S4_MSig;    g_mg[4]=S5_MSig;    g_mg[5]=S6_MSig;    g_mg[6]=S7_MSig;
-   g_kp[0]=S1_KP;      g_kp[1]=S2_KP;      g_kp[2]=S3_KP;      g_kp[3]=S4_KP;      g_kp[4]=S5_KP;      g_kp[5]=S6_KP;      g_kp[6]=S7_KP;
-   g_kk[0]=S1_KK;      g_kk[1]=S2_KK;      g_kk[2]=S3_KK;      g_kk[3]=S4_KK;      g_kk[4]=S5_KK;      g_kk[5]=S6_KK;      g_kk[6]=S7_KK;
-   g_kd[0]=S1_KD;      g_kd[1]=S2_KD;      g_kd[2]=S3_KD;      g_kd[3]=S4_KD;      g_kd[4]=S5_KD;      g_kd[5]=S6_KD;      g_kd[6]=S7_KD;
-   g_ros[0]=S1_RSI_OS; g_ros[1]=S2_RSI_OS; g_ros[2]=S3_RSI_OS; g_ros[3]=S4_RSI_OS; g_ros[4]=S5_RSI_OS; g_ros[5]=S6_RSI_OS; g_ros[6]=S7_RSI_OS;
-   g_rob[0]=S1_RSI_OB; g_rob[1]=S2_RSI_OB; g_rob[2]=S3_RSI_OB; g_rob[3]=S4_RSI_OB; g_rob[4]=S5_RSI_OB; g_rob[5]=S6_RSI_OB; g_rob[6]=S7_RSI_OB;
+   g_ef[0]=S1_EMA_F;   g_ef[1]=S2_EMA_F;   g_ef[2]=S3_EMA_F;   g_ef[3]=S4_EMA_F;   g_ef[4]=S5_EMA_F;   g_ef[5]=S6_EMA_F;   g_ef[6]=S7_EMA_F;   g_ef[7]=S8_EMA_F;   g_ef[8]=S9_EMA_F;   g_ef[9]=S10_EMA_F;   g_ef[10]=S11_EMA_F;
+   g_es[0]=S1_EMA_S;   g_es[1]=S2_EMA_S;   g_es[2]=S3_EMA_S;   g_es[3]=S4_EMA_S;   g_es[4]=S5_EMA_S;   g_es[5]=S6_EMA_S;   g_es[6]=S7_EMA_S;   g_es[7]=S8_EMA_S;   g_es[8]=S9_EMA_S;   g_es[9]=S10_EMA_S;   g_es[10]=S11_EMA_S;
+   g_rp[0]=S1_RSI_P;   g_rp[1]=S2_RSI_P;   g_rp[2]=S3_RSI_P;   g_rp[3]=S4_RSI_P;   g_rp[4]=S5_RSI_P;   g_rp[5]=S6_RSI_P;   g_rp[6]=S7_RSI_P;   g_rp[7]=S8_RSI_P;   g_rp[8]=S9_RSI_P;   g_rp[9]=S10_RSI_P;   g_rp[10]=S11_RSI_P;
+   g_bp[0]=S1_BB_P;    g_bp[1]=S2_BB_P;    g_bp[2]=S3_BB_P;    g_bp[3]=S4_BB_P;    g_bp[4]=S5_BB_P;    g_bp[5]=S6_BB_P;    g_bp[6]=S7_BB_P;    g_bp[7]=S8_BB_P;    g_bp[8]=S9_BB_P;    g_bp[9]=S10_BB_P;    g_bp[10]=S11_BB_P;
+   g_bs[0]=S1_BB_Std;  g_bs[1]=S2_BB_Std;  g_bs[2]=S3_BB_Std;  g_bs[3]=S4_BB_Std;  g_bs[4]=S5_BB_Std;  g_bs[5]=S6_BB_Std;  g_bs[6]=S7_BB_Std;  g_bs[7]=S8_BB_Std;  g_bs[8]=S9_BB_Std;  g_bs[9]=S10_BB_Std;  g_bs[10]=S11_BB_Std;
+   g_mf[0]=S1_MF;      g_mf[1]=S2_MF;      g_mf[2]=S3_MF;      g_mf[3]=S4_MF;      g_mf[4]=S5_MF;      g_mf[5]=S6_MF;      g_mf[6]=S7_MF;      g_mf[7]=S8_MF;      g_mf[8]=S9_MF;      g_mf[9]=S10_MF;      g_mf[10]=S11_MF;
+   g_ms[0]=S1_MS;      g_ms[1]=S2_MS;      g_ms[2]=S3_MS;      g_ms[3]=S4_MS;      g_ms[4]=S5_MS;      g_ms[5]=S6_MS;      g_ms[6]=S7_MS;      g_ms[7]=S8_MS;      g_ms[8]=S9_MS;      g_ms[9]=S10_MS;      g_ms[10]=S11_MS;
+   g_mg[0]=S1_MSig;    g_mg[1]=S2_MSig;    g_mg[2]=S3_MSig;    g_mg[3]=S4_MSig;    g_mg[4]=S5_MSig;    g_mg[5]=S6_MSig;    g_mg[6]=S7_MSig;    g_mg[7]=S8_MSig;    g_mg[8]=S9_MSig;    g_mg[9]=S10_MSig;    g_mg[10]=S11_MSig;
+   g_kp[0]=S1_KP;      g_kp[1]=S2_KP;      g_kp[2]=S3_KP;      g_kp[3]=S4_KP;      g_kp[4]=S5_KP;      g_kp[5]=S6_KP;      g_kp[6]=S7_KP;      g_kp[7]=S8_KP;      g_kp[8]=S9_KP;      g_kp[9]=S10_KP;      g_kp[10]=S11_KP;
+   g_kk[0]=S1_KK;      g_kk[1]=S2_KK;      g_kk[2]=S3_KK;      g_kk[3]=S4_KK;      g_kk[4]=S5_KK;      g_kk[5]=S6_KK;      g_kk[6]=S7_KK;      g_kk[7]=S8_KK;      g_kk[8]=S9_KK;      g_kk[9]=S10_KK;      g_kk[10]=S11_KK;
+   g_kd[0]=S1_KD;      g_kd[1]=S2_KD;      g_kd[2]=S3_KD;      g_kd[3]=S4_KD;      g_kd[4]=S5_KD;      g_kd[5]=S6_KD;      g_kd[6]=S7_KD;      g_kd[7]=S8_KD;      g_kd[8]=S9_KD;      g_kd[9]=S10_KD;      g_kd[10]=S11_KD;
+   g_ros[0]=S1_RSI_OS; g_ros[1]=S2_RSI_OS; g_ros[2]=S3_RSI_OS; g_ros[3]=S4_RSI_OS; g_ros[4]=S5_RSI_OS; g_ros[5]=S6_RSI_OS; g_ros[6]=S7_RSI_OS; g_ros[7]=S8_RSI_OS; g_ros[8]=S9_RSI_OS; g_ros[9]=S10_RSI_OS; g_ros[10]=S11_RSI_OS;
+   g_rob[0]=S1_RSI_OB; g_rob[1]=S2_RSI_OB; g_rob[2]=S3_RSI_OB; g_rob[3]=S4_RSI_OB; g_rob[4]=S5_RSI_OB; g_rob[5]=S6_RSI_OB; g_rob[6]=S7_RSI_OB; g_rob[7]=S8_RSI_OB; g_rob[8]=S9_RSI_OB; g_rob[9]=S10_RSI_OB; g_rob[10]=S11_RSI_OB;
 
    for(int i=0;i<SYM_COUNT;i++)
    {
@@ -546,7 +581,8 @@ void OnTick()
       "MultiCurrency EA v5.2\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       Inp_Sym1+"/"+Inp_Sym2+"/"+Inp_Sym3+"/"+
-      Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"\n",
+      Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"/"+
+      Inp_Sym8+"/"+Inp_Sym9+"/"+Inp_Sym10+"/"+Inp_Sym11+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
       filter.GetStatusReport(symbols[0])
    );
