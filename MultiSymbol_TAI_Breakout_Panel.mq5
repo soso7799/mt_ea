@@ -1,19 +1,34 @@
 //+------------------------------------------------------------------+
 //|  MultiSymbol_TAI_Breakout_Panel.mq5                              |
-//|  純觀察面板指標，不下單。只需掛在「任一張」圖表上一次，          |
-//|  同時顯示監控商品清單裡全部商品的：                              |
-//|    1) TAI 動能狀態（比照 TAI_Color_Panel_Optimized.mq5 的邏輯，  |
-//|       但改成每個商品各自獨立計算，不依賴附掛圖表的商品）         |
-//|    2) 關卡突破狀態（讀 session_levels.csv：亞/歐/美盤高低、      |
-//|       前日高低，取代手畫趨勢線——多商品沒辦法手畫，這是替代方案）|
-//|    3) 綜合建議：兩者同方向才提示「觀察XX」，否則「雜訊/觀望」    |
+//|  純觀察指標，不下單。在「任一張」圖表手動掛上（主控版），        |
+//|  OnInit() 會自動掃描你已開啟的其他圖表分頁，只要商品在監控清單   |
+//|  內，就用 ChartIndicatorAdd() 自動把「畫箭頭版」貼上去——不用你  |
+//|  自己一張一張手動掛。                                            |
+//|                                                                    |
+//|  每張圖各自畫箭頭：TAI動能方向 + 關卡突破方向 同向時才畫，       |
+//|  不顯示文字面板。                                                 |
 //+------------------------------------------------------------------+
-#property copyright "Multi-Symbol observation panel — no trading actions"
-#property version   "1.10"
+#property copyright "Multi-Symbol auto-deploy observation indicator — no trading actions"
+#property version   "2.00"
 #property indicator_chart_window
-#property indicator_plots 0
+#property indicator_buffers 2
+#property indicator_plots   2
 
-input group "=== 監控商品（留空則跳過該欄）==="
+#property indicator_label1  "多方共振"
+#property indicator_type1   DRAW_ARROW
+#property indicator_color1  clrDeepSkyBlue
+#property indicator_width1  2
+
+#property indicator_label2  "空方共振"
+#property indicator_type2   DRAW_ARROW
+#property indicator_color2  clrTomato
+#property indicator_width2  2
+
+// ⚠️ 這個一定要放第一個 input，才能用 iCustom() 傳參數關掉子版的自動部署，
+// 避免子版自己又去掃描開新的、造成無限遞迴貼指標。
+input bool   Inp_AutoDeploy      = true;   // 主控版=true；子版由程式自動帶入false，不要手動改
+
+input group "=== 監控商品清單（用於判斷要不要自動部署到某張圖）==="
 input string Inp_Sym1  = "USDJPY";
 input string Inp_Sym2  = "AUDUSD";
 input string Inp_Sym3  = "USDCAD";
@@ -27,16 +42,12 @@ input string Inp_Sym10 = "US30.cash";
 input string Inp_Sym11 = "JP225.cash";
 
 input group "=== 關卡資料來源 ==="
-// ⚠️ MQL5 FileOpen() 有沙盒限制，不能讀 D:\ 這種磁碟機絕對路徑！
+// ⚠️ MQL5 FileOpen() 沙盒限制，不能讀 D:\ 這種磁碟機絕對路徑！
 // 只能讀 <終端機資料目錄>\MQL5\Files\ 底下的檔案（Inp_UseCommonFiles=false）
-// 或 <終端機資料目錄>\MQL5\Files\Common\ 底下（Inp_UseCommonFiles=true）。
-// 你本機產生 session_levels.csv 的 Python/VBA 流程，要改成同時也輸出一份到
-// 這個資料夾（用「檔案」→「開啟資料目錄」找到路徑），這裡才讀得到。
-// 檔案總管路徑範例（不是這裡填的東西，只是告訴你要把 csv 放哪）：
-//   C:\Users\<你>\AppData\Roaming\MetaQuotes\Terminal\<終端機ID>\MQL5\Files\session_levels.csv
-input string Inp_LevelsCsvFile   = "session_levels.csv"; // 相對於 MQL5\Files\ 的檔名
-input bool   Inp_UseCommonFiles  = false;                 // true=改讀 MQL5\Files\Common\
-input ENUM_TIMEFRAMES Inp_TAI_TF = PERIOD_CURRENT; // TAI 用哪個週期算（PERIOD_CURRENT=跟附掛圖表相同）
+// 或 \MQL5\Files\Common\ 底下（Inp_UseCommonFiles=true）。
+// 「檔案」→「開啟資料目錄」找到路徑，把 session_levels.csv 複製一份放進去。
+input string Inp_LevelsCsvFile  = "session_levels.csv";
+input bool   Inp_UseCommonFiles = false;
 
 input group "=== TAI 參數（比照 TAI_Color_Panel_Optimized.mq5 預設）==="
 input int    Inp_TaiPeriod     = 5;
@@ -48,24 +59,96 @@ input double Inp_FlLevelDown   = 20.0;
 input int    Inp_AtrPeriod     = 14;
 input double Inp_AtrMultiplier = 1.0;
 
-input group "=== 面板 ==="
-input int    Inp_RefreshSeconds = 300; // 5分鐘
-input int    Inp_FontSize       = 9;
-input string Inp_FontName       = "Microsoft JhengHei";
-input int    Inp_PanelX         = 10;
-input int    Inp_PanelY         = 30;
-input int    Inp_RowHeight      = 18;
+input group "=== 箭頭 ==="
+input int    Inp_ArrowOffsetPoints = 30;
+input bool   Inp_EnableAlert       = true;
 
-#define PANEL_PREFIX "MSTAI_"
 #define SYM_COUNT 11
+#define IND_SHORTNAME "MSTAI_ArrowSignal"
 
-string g_symbols[SYM_COUNT];
-int    g_maHandle[SYM_COUNT];
-int    g_atrHandle[SYM_COUNT];
-bool   g_handleOk[SYM_COUNT];
+double BullBuffer[];
+double BearBuffer[];
+
+int    g_maHandle  = INVALID_HANDLE;
+int    g_atrHandle = INVALID_HANDLE;
+double g_val[];       // TAI 值序列（跟 rates_total 對齊）
+double g_fastAvg[];
+datetime g_lastAlertBull = 0;
+datetime g_lastAlertBear = 0;
 
 //+------------------------------------------------------------------+
-//| 讀 session_levels.csv 進記憶體（Symbol -> 8個關卡值）             |
+//| 監控清單                                                          |
+//+------------------------------------------------------------------+
+bool IsWatchedSymbol(const string sym)
+{
+   string list[SYM_COUNT] = {Inp_Sym1,Inp_Sym2,Inp_Sym3,Inp_Sym4,Inp_Sym5,
+                              Inp_Sym6,Inp_Sym7,Inp_Sym8,Inp_Sym9,Inp_Sym10,Inp_Sym11};
+   for(int i=0;i<SYM_COUNT;i++)
+      if(list[i] == sym) return true;
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| 自動部署：掃描已開啟的其他圖表，貼上「子版」（Inp_AutoDeploy=false）|
+//+------------------------------------------------------------------+
+void AutoDeployToOtherCharts()
+{
+   long thisChart = ChartID();
+   long chart = ChartFirst();
+
+   while(chart >= 0)
+   {
+      if(chart != thisChart)
+      {
+         string sym = ChartSymbol(chart);
+
+         if(IsWatchedSymbol(sym))
+         {
+            // 檢查這張圖是不是已經掛過本指標了，避免重複貼
+            bool already = false;
+            int total = ChartIndicatorsTotal(chart, 0);
+            for(int i=0;i<total;i++)
+            {
+               if(ChartIndicatorName(chart, 0, i) == IND_SHORTNAME)
+               {
+                  already = true;
+                  break;
+               }
+            }
+
+            if(!already)
+            {
+               // 注意：iCustom() 的 PERIOD_CURRENT 指的是「執行這段程式碼的圖表」
+               // （也就是主控版所在的那張圖）的週期，不是目標圖表的週期！
+               // 要用 ChartPeriod(chart) 明確取得目標圖表自己的週期，否則子版
+               // 會全部套用主控版的週期，跟目標圖表顯示的K棒週期對不起來。
+               ENUM_TIMEFRAMES targetTf = (ENUM_TIMEFRAMES)ChartPeriod(chart);
+               int h = iCustom(sym, targetTf, "MultiSymbol_TAI_Breakout_Panel",
+                                false, // Inp_AutoDeploy=false，子版不再往外部署
+                                Inp_Sym1,Inp_Sym2,Inp_Sym3,Inp_Sym4,Inp_Sym5,
+                                Inp_Sym6,Inp_Sym7,Inp_Sym8,Inp_Sym9,Inp_Sym10,Inp_Sym11,
+                                Inp_LevelsCsvFile, Inp_UseCommonFiles,
+                                Inp_TaiPeriod, Inp_MaPeriod, Inp_ResponseBoost,
+                                Inp_FlPeriod, Inp_FlLevelUp, Inp_FlLevelDown,
+                                Inp_AtrPeriod, Inp_AtrMultiplier,
+                                Inp_ArrowOffsetPoints, Inp_EnableAlert);
+
+               if(h != INVALID_HANDLE)
+               {
+                  ChartIndicatorAdd(chart, 0, h);
+                  PrintFormat("MultiSymbol_TAI_Breakout_Panel: 自動部署到 %s", sym);
+               }
+               else
+                  PrintFormat("MultiSymbol_TAI_Breakout_Panel: %s 自動部署失敗 err=%d", sym, GetLastError());
+            }
+         }
+      }
+      chart = ChartNext(chart);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| 關卡資料                                                          |
 //+------------------------------------------------------------------+
 struct SessionLevels
 {
@@ -75,8 +158,6 @@ struct SessionLevels
    double usHigh,    usLow;
    double prevHigh,  prevLow;
 };
-
-string g_csvLastError = "";
 
 bool LoadSessionLevels(const string sym, SessionLevels &out)
 {
@@ -88,18 +169,13 @@ bool LoadSessionLevels(const string sym, SessionLevels &out)
 
    int hh = FileOpen(Inp_LevelsCsvFile, flags);
    if(hh == INVALID_HANDLE)
-   {
-      g_csvLastError = StringFormat("開不到檔案 err=%d（確認檔案在 MQL5\\Files%s\\ 底下）",
-                                     GetLastError(), Inp_UseCommonFiles ? "\\Common" : "");
       return false;
-   }
-   g_csvLastError = "";
 
    bool first = true;
    while(!FileIsEnding(hh))
    {
       string line = FileReadString(hh);
-      if(first) { first = false; continue; } // 跳過表頭
+      if(first) { first = false; continue; }
       if(StringLen(line) == 0) continue;
 
       string parts[];
@@ -107,7 +183,6 @@ bool LoadSessionLevels(const string sym, SessionLevels &out)
       if(n < 10) continue;
       if(parts[0] != sym) continue;
 
-      // Symbol,PrevDate,Asian_High,Asian_Low,European_High,European_Low,US_High,US_Low,PrevDay_High,PrevDay_Low,CurrentPrice
       out.asianHigh = StringToDouble(parts[2]);
       out.asianLow  = StringToDouble(parts[3]);
       out.euroHigh  = StringToDouble(parts[4]);
@@ -123,128 +198,116 @@ bool LoadSessionLevels(const string sym, SessionLevels &out)
    return out.found;
 }
 
-//+------------------------------------------------------------------+
-//| 關卡突破狀態                                                      |
-//+------------------------------------------------------------------+
-string GetLevelStatus(const string sym, color &outColor)
+// 傳回 +1=突破(多), -1=跌破(空), 0=區間內/無資料
+int GetLevelDirection(const double price)
 {
    SessionLevels lv;
-   outColor = clrSilver;
+   if(!LoadSessionLevels(_Symbol, lv))
+      return 0;
 
-   if(!LoadSessionLevels(sym, lv))
-      return (g_csvLastError != "") ? g_csvLastError : "CSV裡找不到此代碼";
-
-   double price = SymbolInfoDouble(sym, SYMBOL_BID);
-   if(price <= 0.0)
-      return "無報價";
-
-   // 由近到遠依序比對：前日高低 > 美盤高低 > 歐盤高低 > 亞盤高低
-   if(price > lv.prevHigh && lv.prevHigh > 0)
-   {
-      outColor = clrDeepSkyBlue;
-      return StringFormat("突破前日高點(%s)", DoubleToString(lv.prevHigh, _Digits));
-   }
-   if(price < lv.prevLow && lv.prevLow > 0)
-   {
-      outColor = clrTomato;
-      return StringFormat("跌破前日低點(%s)", DoubleToString(lv.prevLow, _Digits));
-   }
-   if(price > lv.usHigh && lv.usHigh > 0)
-   {
-      outColor = clrDeepSkyBlue;
-      return "突破美盤高點";
-   }
-   if(price < lv.usLow && lv.usLow > 0)
-   {
-      outColor = clrTomato;
-      return "跌破美盤低點";
-   }
-   if(price > lv.euroHigh && lv.euroHigh > 0)
-   {
-      outColor = clrLimeGreen;
-      return "突破歐盤高點";
-   }
-   if(price < lv.euroLow && lv.euroLow > 0)
-   {
-      outColor = clrOrange;
-      return "跌破歐盤低點";
-   }
-   if(price > lv.asianHigh && lv.asianHigh > 0)
-   {
-      outColor = clrLimeGreen;
-      return "突破亞盤高點";
-   }
-   if(price < lv.asianLow && lv.asianLow > 0)
-   {
-      outColor = clrOrange;
-      return "跌破亞盤低點";
-   }
-
-   return "區間內(未突破)";
+   if(lv.prevHigh > 0 && price > lv.prevHigh) return 1;
+   if(lv.prevLow  > 0 && price < lv.prevLow)  return -1;
+   if(lv.usHigh   > 0 && price > lv.usHigh)   return 1;
+   if(lv.usLow    > 0 && price < lv.usLow)    return -1;
+   if(lv.euroHigh > 0 && price > lv.euroHigh) return 1;
+   if(lv.euroLow  > 0 && price < lv.euroLow)  return -1;
+   if(lv.asianHigh> 0 && price > lv.asianHigh)return 1;
+   if(lv.asianLow > 0 && price < lv.asianLow) return -1;
+   return 0;
 }
 
 //+------------------------------------------------------------------+
-//| TAI 動能狀態（單一商品，只算最新狀態，不畫線）                    |
-//| handle 是 OnInit() 建好、長期重複使用的，不在這裡重新建立         |
-//+------------------------------------------------------------------+
-string GetTaiState(const int idx, color &outColor)
+int OnInit()
 {
-   outColor = clrSilver;
-   string sym = g_symbols[idx];
+   SetIndexBuffer(0, BullBuffer, INDICATOR_DATA);
+   SetIndexBuffer(1, BearBuffer, INDICATOR_DATA);
+   ArraySetAsSeries(BullBuffer, false);
+   ArraySetAsSeries(BearBuffer, false);
 
-   if(!g_handleOk[idx])
-      return "指標建立失敗";
+   PlotIndexSetInteger(0, PLOT_ARROW, 233);
+   PlotIndexSetInteger(1, PLOT_ARROW, 234);
+   PlotIndexSetDouble(0, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(1, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   ENUM_TIMEFRAMES tf = (Inp_TAI_TF == PERIOD_CURRENT) ? _Period : Inp_TAI_TF;
-   int maH  = g_maHandle[idx];
-   int atrH = g_atrHandle[idx];
-
-   int need = Inp_TaiPeriod + Inp_FlPeriod + 10;
-
-   int calcMa  = BarsCalculated(maH);
-   int calcAtr = BarsCalculated(atrH);
-   if(calcMa < need || calcAtr < need)
-      return StringFormat("資料載入中(%d/%d)", MathMin(calcMa, calcAtr), need);
-
-   double avg[], atrBuf[], closeArr[];
-   ArraySetAsSeries(avg, false);
-   ArraySetAsSeries(atrBuf, false);
-   ArraySetAsSeries(closeArr, false);
-
-   if(CopyBuffer(maH, 0, 0, need, avg) != need ||
-      CopyBuffer(atrH, 0, 0, need, atrBuf) != need ||
-      CopyClose(sym, tf, 0, need, closeArr) != need)
-      return "資料讀取失敗";
-
-   double fastAvg[]; ArrayResize(fastAvg, need);
-   fastAvg[0] = avg[0];
-   for(int i = 1; i < need; i++)
-      fastAvg[i] = avg[i] + Inp_ResponseBoost * (avg[i] - avg[i-1]);
-
-   double val[]; ArrayResize(val, need);
-   ArrayInitialize(val, 0.0);
-   for(int i = Inp_TaiPeriod; i < need; i++)
+   g_maHandle  = iMA(_Symbol, _Period, Inp_MaPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   g_atrHandle = iATR(_Symbol, _Period, Inp_AtrPeriod);
+   if(g_maHandle == INVALID_HANDLE || g_atrHandle == INVALID_HANDLE)
    {
-      int rs = i - Inp_TaiPeriod + 1;
-      double mx = fastAvg[rs], mn = fastAvg[rs];
-      for(int j = rs+1; j <= i; j++) { mx = MathMax(mx, fastAvg[j]); mn = MathMin(mn, fastAvg[j]); }
-
-      double price = closeArr[i];
-      double dir = (fastAvg[i] >= fastAvg[i-1]) ? 1.0 : -1.0;
-      val[i] = (MathAbs(price) > DBL_EPSILON) ? 100.0*dir*(mx-mn)/MathAbs(price) : 0.0;
+      PrintFormat("MultiSymbol_TAI_Breakout_Panel: %s 建立handle失敗 err=%d", _Symbol, GetLastError());
+      return INIT_FAILED;
    }
 
-   int valc[]; ArrayResize(valc, need);
-   ArrayInitialize(valc, 0);
-   int startFl = Inp_TaiPeriod + Inp_FlPeriod;
-   for(int i = startFl; i < need; i++)
+   IndicatorSetString(INDICATOR_SHORTNAME, IND_SHORTNAME);
+
+   if(Inp_AutoDeploy)
+      AutoDeployToOtherCharts();
+
+   return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason)
+{
+   if(g_maHandle  != INVALID_HANDLE) IndicatorRelease(g_maHandle);
+   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+}
+
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total, const int prev_calculated,
+                const datetime &time[], const double &open[],
+                const double &high[], const double &low[],
+                const double &close[], const long &tick_volume[],
+                const long &volume[], const int &spread[])
+{
+   int need = Inp_TaiPeriod + Inp_FlPeriod + 5;
+   if(rates_total < need)
+      return 0;
+
+   if(BarsCalculated(g_maHandle) < rates_total || BarsCalculated(g_atrHandle) < rates_total)
+      return prev_calculated;
+
+   double avg[], atrBuf[];
+   ArraySetAsSeries(avg, false);
+   ArraySetAsSeries(atrBuf, false);
+   if(CopyBuffer(g_maHandle, 0, 0, rates_total, avg) != rates_total ||
+      CopyBuffer(g_atrHandle, 0, 0, rates_total, atrBuf) != rates_total)
+      return prev_calculated;
+
+   ArrayResize(g_fastAvg, rates_total);
+   ArrayResize(g_val, rates_total);
+
+   int start = (prev_calculated <= 1) ? 1 : prev_calculated - 1;
+   if(prev_calculated <= 1)
    {
+      g_fastAvg[0] = avg[0];
+      g_val[0] = 0.0;
+      BullBuffer[0] = EMPTY_VALUE;
+      BearBuffer[0] = EMPTY_VALUE;
+   }
+
+   // 只需要算到 rates_total-1 這根，用最新2根判斷是否觸發箭頭
+   for(int i = start; i < rates_total; i++)
+   {
+      g_fastAvg[i] = avg[i] + Inp_ResponseBoost * (avg[i] - avg[i-1]);
+      BullBuffer[i] = EMPTY_VALUE;
+      BearBuffer[i] = EMPTY_VALUE;
+
+      if(i < Inp_TaiPeriod) { g_val[i] = 0.0; continue; }
+
+      int rs = i - Inp_TaiPeriod + 1;
+      double mx = g_fastAvg[rs], mn = g_fastAvg[rs];
+      for(int j = rs+1; j <= i; j++) { mx = MathMax(mx, g_fastAvg[j]); mn = MathMin(mn, g_fastAvg[j]); }
+
+      double dir = (g_fastAvg[i] >= g_fastAvg[i-1]) ? 1.0 : -1.0;
+      g_val[i] = (MathAbs(close[i]) > DBL_EPSILON) ? 100.0*dir*(mx-mn)/MathAbs(close[i]) : 0.0;
+
+      if(i < Inp_TaiPeriod + Inp_FlPeriod) continue;
+
       int fs = i - Inp_FlPeriod + 1;
-      double vmin = val[fs], vmax = val[fs];
-      for(int j = fs+1; j <= i; j++) { vmin = MathMin(vmin, val[j]); vmax = MathMax(vmax, val[j]); }
+      double vmin = g_val[fs], vmax = g_val[fs];
+      for(int j = fs+1; j <= i; j++) { vmin = MathMin(vmin, g_val[j]); vmax = MathMax(vmax, g_val[j]); }
 
       double range = MathMax(vmax - vmin, DBL_EPSILON);
-      double atrRatio = (MathAbs(closeArr[i]) > DBL_EPSILON) ? atrBuf[i]/MathAbs(closeArr[i]) : 0.0;
+      double atrRatio = (MathAbs(close[i]) > DBL_EPSILON) ? atrBuf[i]/MathAbs(close[i]) : 0.0;
       double volatility = MathMin(0.20, atrRatio * Inp_AtrMultiplier * 10.0);
       double upperPct = MathMin(95.0, Inp_FlLevelUp + volatility*25.0);
       double lowerPct = MathMax(5.0,  Inp_FlLevelDown - volatility*25.0);
@@ -252,167 +315,41 @@ string GetTaiState(const int idx, color &outColor)
       double levelUp = vmin + range*upperPct*0.01;
       double levelDn = vmin + range*lowerPct*0.01;
 
-      bool rising  = (val[i] > val[i-1]);
-      bool falling = (val[i] < val[i-1]);
+      bool rising  = (g_val[i] > g_val[i-1]);
+      bool falling = (g_val[i] < g_val[i-1]);
 
-      if(val[i] > levelUp && rising)       valc[i] = 1;
-      else if(val[i] < levelDn && falling) valc[i] = 2;
-      else                                 valc[i] = 0;
+      int taiDir = 0;
+      if(g_val[i] > levelUp && rising)       taiDir = 1;
+      else if(g_val[i] < levelDn && falling) taiDir = -1;
+
+      // 只在「最新這根」判斷關卡突破（關卡是即時Session資料，歷史K棒套用意義不大）
+      if(i == rates_total - 1 && taiDir != 0)
+      {
+         double price = close[i];
+         int lvlDir = GetLevelDirection(price);
+         double offset = Inp_ArrowOffsetPoints * _Point;
+
+         if(taiDir == 1 && lvlDir == 1)
+         {
+            BullBuffer[i] = low[i] - offset;
+            if(Inp_EnableAlert && g_lastAlertBull != time[i])
+            {
+               g_lastAlertBull = time[i];
+               Alert(_Symbol, " ", EnumToString(_Period), " 多方共振(TAI+關卡突破) @ ", TimeToString(time[i]));
+            }
+         }
+         else if(taiDir == -1 && lvlDir == -1)
+         {
+            BearBuffer[i] = high[i] + offset;
+            if(Inp_EnableAlert && g_lastAlertBear != time[i])
+            {
+               g_lastAlertBear = time[i];
+               Alert(_Symbol, " ", EnumToString(_Period), " 空方共振(TAI+關卡跌破) @ ", TimeToString(time[i]));
+            }
+         }
+      }
    }
 
-   int stateBar = need - 2; // 比照原指標用已收盤K棒
-   int upBars = 0, downBars = 0;
-   for(int k = stateBar; k >= MathMax(startFl, stateBar-4); k--)
-   {
-      if(valc[k] == 1 && downBars == 0) upBars++;
-      else if(valc[k] == 2 && upBars == 0) downBars++;
-      else break;
-   }
-
-   if(upBars >= 2)   { outColor = clrDeepSkyBlue; return "多頭動能延續"; }
-   if(downBars >= 2) { outColor = clrTomato;      return "空頭動能延續"; }
-   if(upBars == 1)   { outColor = clrLimeGreen;   return "多頭動能啟動"; }
-   if(downBars == 1) { outColor = clrOrange;      return "空頭動能啟動"; }
-   return "橫盤震盪";
-}
-
-//+------------------------------------------------------------------+
-//| 綜合結論                                                          |
-//+------------------------------------------------------------------+
-string Combine(const string taiState, const string levelState, color &outColor)
-{
-   bool taiBull  = (taiState == "多頭動能延續" || taiState == "多頭動能啟動");
-   bool taiBear  = (taiState == "空頭動能延續" || taiState == "空頭動能啟動");
-   bool lvlBull  = (StringFind(levelState, "突破") == 0);
-   bool lvlBear  = (StringFind(levelState, "跌破") == 0);
-
-   if(taiBull && lvlBull) { outColor = clrLimeGreen; return "多方共振，觀察多單"; }
-   if(taiBear && lvlBear) { outColor = clrTomato;     return "空方共振，觀察空單"; }
-   outColor = clrGray;
-   return "方向不一致，觀望";
-}
-
-//+------------------------------------------------------------------+
-//| 面板繪製                                                          |
-//+------------------------------------------------------------------+
-void CreatePanelLabel(const string name, const int x, const int y,
-                       const string text, const color clr)
-{
-   if(ObjectFind(0, name) < 0)
-      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-
-   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
-   ObjectSetString(0, name, OBJPROP_TEXT, text);
-   ObjectSetString(0, name, OBJPROP_FONT, Inp_FontName);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, Inp_FontSize);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
-}
-
-void DeletePanel()
-{
-   ObjectsDeleteAll(0, PANEL_PREFIX);
-}
-
-void RefreshPanel()
-{
-   int y = Inp_PanelY;
-
-   CreatePanelLabel(PANEL_PREFIX+"HDR", Inp_PanelX, y,
-      StringFormat("== 多商品觀察面板  更新:%s ==", TimeToString(TimeLocal(), TIME_MINUTES|TIME_SECONDS)),
-      clrWhite);
-   y += Inp_RowHeight;
-
-   CreatePanelLabel(PANEL_PREFIX+"COLHDR", Inp_PanelX, y,
-      StringFormat("%-12s %-16s %-22s %s", "Symbol", "TAI動能", "關卡狀態", "綜合結論"),
-      clrSilver);
-   y += Inp_RowHeight;
-
-   for(int i = 0; i < SYM_COUNT; i++)
-   {
-      string sym = g_symbols[i];
-      if(StringLen(sym) == 0) continue;
-
-      color taiColor, lvlColor, combColor;
-      string taiState   = GetTaiState(i, taiColor);
-      string levelState = GetLevelStatus(sym, lvlColor);
-      string combined   = Combine(taiState, levelState, combColor);
-
-      string line = StringFormat("%-12s %-16s %-22s %s", sym, taiState, levelState, combined);
-      CreatePanelLabel(PANEL_PREFIX+"ROW"+IntegerToString(i), Inp_PanelX, y, line, combColor);
-      y += Inp_RowHeight;
-   }
-
-   ChartRedraw(0);
-}
-
-//+------------------------------------------------------------------+
-int OnInit()
-{
-   g_symbols[0]=Inp_Sym1;  g_symbols[1]=Inp_Sym2;  g_symbols[2]=Inp_Sym3;
-   g_symbols[3]=Inp_Sym4;  g_symbols[4]=Inp_Sym5;  g_symbols[5]=Inp_Sym6;
-   g_symbols[6]=Inp_Sym7;  g_symbols[7]=Inp_Sym8;  g_symbols[8]=Inp_Sym9;
-   g_symbols[9]=Inp_Sym10; g_symbols[10]=Inp_Sym11;
-
-   ENUM_TIMEFRAMES tf = (Inp_TAI_TF == PERIOD_CURRENT) ? _Period : Inp_TAI_TF;
-
-   for(int i = 0; i < SYM_COUNT; i++)
-   {
-      g_maHandle[i]  = INVALID_HANDLE;
-      g_atrHandle[i] = INVALID_HANDLE;
-      g_handleOk[i]  = false;
-
-      if(StringLen(g_symbols[i]) == 0)
-         continue;
-
-      // 確保商品在市場報價視窗裡（否則MT5可能不會抓歷史資料）
-      SymbolSelect(g_symbols[i], true);
-
-      g_maHandle[i]  = iMA(g_symbols[i], tf, Inp_MaPeriod, 0, MODE_EMA, PRICE_CLOSE);
-      g_atrHandle[i] = iATR(g_symbols[i], tf, Inp_AtrPeriod);
-
-      if(g_maHandle[i] == INVALID_HANDLE || g_atrHandle[i] == INVALID_HANDLE)
-         PrintFormat("MultiSymbol_TAI_Breakout_Panel: %s 建立handle失敗 err=%d", g_symbols[i], GetLastError());
-      else
-         g_handleOk[i] = true;
-   }
-
-   EventSetTimer(MathMax(5, Inp_RefreshSeconds));
-   RefreshPanel();
-
-   IndicatorSetString(INDICATOR_SHORTNAME, "多商品觀察面板");
-   return INIT_SUCCEEDED;
-}
-
-void OnDeinit(const int reason)
-{
-   EventKillTimer();
-
-   for(int i = 0; i < SYM_COUNT; i++)
-   {
-      if(g_maHandle[i]  != INVALID_HANDLE) IndicatorRelease(g_maHandle[i]);
-      if(g_atrHandle[i] != INVALID_HANDLE) IndicatorRelease(g_atrHandle[i]);
-   }
-
-   DeletePanel();
-   ChartRedraw(0);
-}
-
-void OnTimer()
-{
-   RefreshPanel();
-}
-
-int OnCalculate(const int rates_total, const int prev_calculated,
-                const datetime &time[], const double &open[],
-                const double &high[], const double &low[],
-                const double &close[], const long &tick_volume[],
-                const long &volume[], const int &spread[])
-{
    return rates_total;
 }
 //+------------------------------------------------------------------+
