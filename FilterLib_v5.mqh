@@ -434,14 +434,12 @@ public:
       // symbol 欄位要跟 GetCoreSymbol() 轉大寫後的broker代碼完全一致
       // （broker 若用 "US100.cash" 這種寫法，轉大寫後會是 "US100.CASH"）。
       //
-      // ⚠️ 重要：PipSize() 是為外匯設計的（2/3位小數→0.01，其餘→0.0001），
-      // 底下 sl_pips/tp_pips/atr_threshold 是「假設這幾個指數 SYMBOL_DIGITS=2
-      // （即 PipSize=0.01）」反推出來的點數，換算成實際價格距離大約是：
-      // US100.cash ≈80點、US500.cash ≈25點、US30.cash ≈150點、JP225.cash ≈180點。
-      // 如果你的 broker 這幾個商品的小數位數不是2位，這組數字會整個跑掉
-      // （例如變成離現價幾百倍遠或近到瞬間停損），上線前務必先用
-      // Print(SymbolInfoInteger("US100.cash",SYMBOL_DIGITS)) 之類的方式
-      // 確認實際小數位數，再校正這裡的數字。
+      // ✅ 已用 check_symbols.py 連線實際帳戶驗證：這 4 個指數在這個 broker
+      // 上 SYMBOL_DIGITS 都是 2（PipSize()=0.01），換算成實際價格距離：
+      // US100.cash ≈80點、US500.cash ≈25點、US30.cash ≈150點、JP225.cash ≈180點，
+      // 跟下面 sl_pips/tp_pips/atr_threshold 的換算是對的，不用再改。
+      // ⚠️ 但這組「80/25/150/180點」的距離本身還是未回測估計值，只是保證
+      // 換算方式正確、不會離譜；正式交易前一樣要用實際回測數據校準這幾個值。
       fx_rules[21].symbol="US100.CASH"; fx_rules[21].sl_pips=8000.00;  fx_rules[21].tp_pips=16000.00; fx_rules[21].atr_threshold=6000.00;  fx_rules[21].lot_size=0.01;
       fx_rules[22].symbol="US500.CASH"; fx_rules[22].sl_pips=2500.00;  fx_rules[22].tp_pips=5000.00;  fx_rules[22].atr_threshold=1800.00;  fx_rules[22].lot_size=0.01;
       fx_rules[23].symbol="US30.CASH";  fx_rules[23].sl_pips=15000.00; fx_rules[23].tp_pips=30000.00; fx_rules[23].atr_threshold=11000.00; fx_rules[23].lot_size=0.01;
