@@ -11,7 +11,7 @@
 //--------------------------------------------------------------------
 // 支援幣別
 //--------------------------------------------------------------------
-const string SYMBOLS[20] = {
+const string SYMBOLS[27] = {
 
    "AUDJPY",
    "AUDSGD",
@@ -32,7 +32,17 @@ const string SYMBOLS[20] = {
    "USDCHF",
    "USDJPY",
    "USDMXN",
-   "USDTRY"
+   "USDTRY",
+   // ⚠️ 以下7個是預留（金屬/石油/天然氣），一勞永逸先擴充進來備用，
+   // 目前 MultiCurrency_EA.mq5 沒有交易這些商品，加進來只是讓 F段
+   // 背景監控涵蓋得到；要實際交易還是要去 fx_rules[] 校準SL/TP數字。
+   "XAUUSD",
+   "XAGUSD",
+   "XPTUSD",
+   "XPDUSD",
+   "USOIL.cash",
+   "UKOIL.cash",
+   "NATGAS.cash"
 };
 
 //--------------------------------------------------------------------
@@ -71,7 +81,7 @@ struct SymbolRule
 //--------------------------------------------------------------------
 int SymIdx(const string sym)
 {
-   for(int i=0; i<20; i++)
+   for(int i=0; i<27; i++)
       if(SYMBOLS[i]==sym) return i;
    return -1;
 }
@@ -93,16 +103,16 @@ private:
    long             magic;
    ENUM_TIMEFRAMES  m_tf;
 
-   int      m_hEmaFast[20];
-   int      m_hEmaSlow[20];
-   int      m_hRSI[20];
-   int      m_hBB[20];
-   int      m_hMACD[20];
-   int      m_hStoch[20];
+   int      m_hEmaFast[27];
+   int      m_hEmaSlow[27];
+   int      m_hRSI[27];
+   int      m_hBB[27];
+   int      m_hMACD[27];
+   int      m_hStoch[27];
 
-   datetime m_lastBarTime[20];
-   bool     m_barUsed[20];
-   datetime m_lastBarTimeF[20];
+   datetime m_lastBarTime[27];
+   bool     m_barUsed[27];
+   datetime m_lastBarTimeF[27];
 
    datetime lastResetDay;
    bool     forceClosedToday;
@@ -392,7 +402,7 @@ public:
    //-----------------------------------------------------------------
    void InitRules()
    {
-      ArrayResize(fx_rules, 25);
+      ArrayResize(fx_rules, 32);
 
       fx_rules[0].symbol="AUDJPY";  fx_rules[0].sl_pips=34.41;  fx_rules[0].tp_pips=68.82;   fx_rules[0].atr_threshold=22.94;   fx_rules[0].lot_size=0.49;
       fx_rules[1].symbol="AUDSGD";  fx_rules[1].sl_pips=22.51;  fx_rules[1].tp_pips=45.01;   fx_rules[1].atr_threshold=15.00;   fx_rules[1].lot_size=0.61;
@@ -444,6 +454,25 @@ public:
       fx_rules[22].symbol="US500.CASH"; fx_rules[22].sl_pips=2500.00;  fx_rules[22].tp_pips=5000.00;  fx_rules[22].atr_threshold=1800.00;  fx_rules[22].lot_size=0.01;
       fx_rules[23].symbol="US30.CASH";  fx_rules[23].sl_pips=15000.00; fx_rules[23].tp_pips=30000.00; fx_rules[23].atr_threshold=11000.00; fx_rules[23].lot_size=0.01;
       fx_rules[24].symbol="JP225.CASH"; fx_rules[24].sl_pips=18000.00; fx_rules[24].tp_pips=36000.00; fx_rules[24].atr_threshold=13000.00; fx_rules[24].lot_size=0.01;
+
+      // ⚠️⚠️⚠️ PLACEHOLDER — 一勞永逸先把金屬/石油/天然氣加進來備用 ⚠️⚠️⚠️
+      // 完全沒有回測校準，SL/TP/ATR門檻是保守估計值，lot_size 固定最小 0.01。
+      // 這幾個商品的 SYMBOL_DIGITS 大多是 2 或 3（PipSize()兩者都算0.01，
+      // 所以換算方式跟外匯不同但巧合地用同一套公式不會離譜），但還是要用
+      // check_symbols.py 或 Print(SymbolInfoInteger(sym,SYMBOL_DIGITS))
+      // 實際跑一次帳戶驗證，確認跟下面假設的一致再上線。
+      // 換算成實際價格距離大約是：
+      // XAUUSD(金) ≈15、XAGUSD(銀) ≈0.5、XPTUSD(鉑) ≈15、XPDUSD(鈀) ≈30、
+      // USOIL/UKOIL(原油) ≈1.0、NATGAS(天然氣) ≈0.1。
+      // MultiCurrency_EA.mq5 目前沒有交易這幾個商品（Inp_Sym1~11沒有它們），
+      // 這裡只是先備用，要真的交易還要去 EA 加 Inp_SymXX 輸入欄位。
+      fx_rules[25].symbol="XAUUSD";     fx_rules[25].sl_pips=1500.00; fx_rules[25].tp_pips=3000.00; fx_rules[25].atr_threshold=1100.00; fx_rules[25].lot_size=0.01;
+      fx_rules[26].symbol="XAGUSD";     fx_rules[26].sl_pips=50.00;   fx_rules[26].tp_pips=100.00;  fx_rules[26].atr_threshold=35.00;   fx_rules[26].lot_size=0.01;
+      fx_rules[27].symbol="XPTUSD";     fx_rules[27].sl_pips=1500.00; fx_rules[27].tp_pips=3000.00; fx_rules[27].atr_threshold=1100.00; fx_rules[27].lot_size=0.01;
+      fx_rules[28].symbol="XPDUSD";     fx_rules[28].sl_pips=3000.00; fx_rules[28].tp_pips=6000.00; fx_rules[28].atr_threshold=2200.00; fx_rules[28].lot_size=0.01;
+      fx_rules[29].symbol="USOIL.CASH"; fx_rules[29].sl_pips=100.00;  fx_rules[29].tp_pips=200.00;  fx_rules[29].atr_threshold=70.00;   fx_rules[29].lot_size=0.01;
+      fx_rules[30].symbol="UKOIL.CASH"; fx_rules[30].sl_pips=100.00;  fx_rules[30].tp_pips=200.00;  fx_rules[30].atr_threshold=70.00;   fx_rules[30].lot_size=0.01;
+      fx_rules[31].symbol="NATGAS.CASH";fx_rules[31].sl_pips=10.00;   fx_rules[31].tp_pips=20.00;   fx_rules[31].atr_threshold=7.00;    fx_rules[31].lot_size=0.01;
    }
 
    bool ApplyRuleBySymbol(string chart_symbol)
@@ -490,7 +519,7 @@ public:
 
       InitRules();
 
-      for(int i=0; i<20; i++)
+      for(int i=0; i<27; i++)
       {
          m_hEmaFast[i]     = INVALID_HANDLE;
          m_hEmaSlow[i]     = INVALID_HANDLE;
@@ -517,7 +546,7 @@ public:
       // _calcSignalShift() 對該代碼會自動回傳 SIG_NONE，不影響其他代碼）。
       bool anyFailed = false;
 
-      for(int i=0; i<20; i++)
+      for(int i=0; i<27; i++)
       {
          string sym = SYMBOLS[i];
          m_hEmaFast[i] = iMA(sym, m_tf, EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
@@ -552,7 +581,7 @@ public:
 
    void DeinitIndicators()
    {
-      for(int i=0; i<20; i++)
+      for(int i=0; i<27; i++)
       {
          if(m_hEmaFast[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaFast[i]); m_hEmaFast[i] = INVALID_HANDLE; }
          if(m_hEmaSlow[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaSlow[i]); m_hEmaSlow[i] = INVALID_HANDLE; }
