@@ -63,6 +63,18 @@ input group "=== 箭頭 ==="
 input int    Inp_ArrowOffsetPoints = 30;
 input bool   Inp_EnableAlert       = true;
 
+input group "=== 關卡水平線 ==="
+input bool   Inp_ShowLevelLines  = true;
+input int    Inp_LineRefreshSec  = 60;
+input color  Inp_ColorPrevHigh   = clrRed;
+input color  Inp_ColorPrevLow    = clrRed;
+input color  Inp_ColorUsHigh     = clrOrange;
+input color  Inp_ColorUsLow      = clrOrange;
+input color  Inp_ColorEuroHigh   = clrYellow;
+input color  Inp_ColorEuroLow    = clrYellow;
+input color  Inp_ColorAsianHigh  = clrDodgerBlue;
+input color  Inp_ColorAsianLow   = clrDodgerBlue;
+
 #define SYM_COUNT 11
 #define IND_SHORTNAME "MSTAI_ArrowSignal"
 
@@ -198,6 +210,62 @@ bool LoadSessionLevels(const string sym, SessionLevels &out)
    return out.found;
 }
 
+//+------------------------------------------------------------------+
+//| 畫關卡水平線（每張圖畫自己商品的線）                              |
+//+------------------------------------------------------------------+
+#define LINE_PREFIX "MSTAI_LV_"
+
+void DrawLevelLine(const string name, const double price, const color clr, const string labelText)
+{
+   if(price <= 0.0)
+   {
+      ObjectDelete(0, name);
+      return;
+   }
+
+   if(ObjectFind(0, name) < 0)
+      ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+
+   ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DASH);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetString(0, name, OBJPROP_TEXT, labelText);
+}
+
+void RefreshLevelLines()
+{
+   if(!Inp_ShowLevelLines)
+      return;
+
+   SessionLevels lv;
+   if(!LoadSessionLevels(_Symbol, lv))
+   {
+      // 這張圖的商品在CSV裡找不到資料，把舊的線清掉避免顯示過期關卡
+      string names[8] = {"PrevHigh","PrevLow","UsHigh","UsLow","EuroHigh","EuroLow","AsianHigh","AsianLow"};
+      for(int i=0;i<8;i++) ObjectDelete(0, LINE_PREFIX+names[i]);
+      return;
+   }
+
+   DrawLevelLine(LINE_PREFIX+"PrevHigh",  lv.prevHigh,  Inp_ColorPrevHigh,  "前日高點 "+DoubleToString(lv.prevHigh,_Digits));
+   DrawLevelLine(LINE_PREFIX+"PrevLow",   lv.prevLow,   Inp_ColorPrevLow,   "前日低點 "+DoubleToString(lv.prevLow,_Digits));
+   DrawLevelLine(LINE_PREFIX+"UsHigh",    lv.usHigh,    Inp_ColorUsHigh,    "美盤高點 "+DoubleToString(lv.usHigh,_Digits));
+   DrawLevelLine(LINE_PREFIX+"UsLow",     lv.usLow,     Inp_ColorUsLow,     "美盤低點 "+DoubleToString(lv.usLow,_Digits));
+   DrawLevelLine(LINE_PREFIX+"EuroHigh",  lv.euroHigh,  Inp_ColorEuroHigh,  "歐盤高點 "+DoubleToString(lv.euroHigh,_Digits));
+   DrawLevelLine(LINE_PREFIX+"EuroLow",   lv.euroLow,   Inp_ColorEuroLow,   "歐盤低點 "+DoubleToString(lv.euroLow,_Digits));
+   DrawLevelLine(LINE_PREFIX+"AsianHigh", lv.asianHigh, Inp_ColorAsianHigh, "亞盤高點 "+DoubleToString(lv.asianHigh,_Digits));
+   DrawLevelLine(LINE_PREFIX+"AsianLow",  lv.asianLow,  Inp_ColorAsianLow,  "亞盤低點 "+DoubleToString(lv.asianLow,_Digits));
+
+   ChartRedraw(0);
+}
+
+void DeleteLevelLines()
+{
+   ObjectsDeleteAll(0, LINE_PREFIX);
+}
+
 // 傳回 +1=突破(多), -1=跌破(空), 0=區間內/無資料
 int GetLevelDirection(const double price)
 {
@@ -242,13 +310,24 @@ int OnInit()
    if(Inp_AutoDeploy)
       AutoDeployToOtherCharts();
 
+   RefreshLevelLines();
+   EventSetTimer(MathMax(5, Inp_LineRefreshSec));
+
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
    if(g_maHandle  != INVALID_HANDLE) IndicatorRelease(g_maHandle);
    if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   DeleteLevelLines();
+   ChartRedraw(0);
+}
+
+void OnTimer()
+{
+   RefreshLevelLines();
 }
 
 //+------------------------------------------------------------------+
