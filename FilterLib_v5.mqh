@@ -496,9 +496,16 @@ public:
    //-----------------------------------------------------------------
    bool InitIndicators()
    {
+      int failCount = 0;
+
       for(int i=0; i<SYMBOL_COUNT; i++)
       {
          string sym = SYMBOLS[i];
+
+         // 券商 Market Watch 裡沒勾選的商品先嘗試自動加入，
+         // 加不進去（真的沒這商品）SymbolSelect 會回傳 false，後面 iXxx 也會建 handle 失敗。
+         SymbolSelect(sym, true);
+
          m_hEmaFast[i] = iMA(sym, m_tf, EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
          m_hEmaSlow[i] = iMA(sym, m_tf, EMA_SLOW, 0, MODE_EMA, PRICE_CLOSE);
          m_hRSI[i]     = iRSI(sym, m_tf, RSI_PERIOD, PRICE_CLOSE);
@@ -515,12 +522,27 @@ public:
             m_hRSI[i]     == INVALID_HANDLE || m_hBB[i]      == INVALID_HANDLE ||
             m_hMACD[i]    == INVALID_HANDLE || m_hStoch[i]   == INVALID_HANDLE)
          {
-            PrintFormat("FilterLib v5: handle建立失敗 %s (err=%d)", sym, GetLastError());
-            return false;
+            // 該商品券商不支援/沒報價，釋放已建立的handle，整個標記跳過，
+            // 不影響其餘商品——只有真正在用的貨幣對才需要InitIndicators 100%成功。
+            PrintFormat("⚠️ FilterLib v5: %s 指標handle建立失敗(err=%d)，跳過此商品", sym, GetLastError());
+
+            if(m_hEmaFast[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaFast[i]); m_hEmaFast[i] = INVALID_HANDLE; }
+            if(m_hEmaSlow[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaSlow[i]); m_hEmaSlow[i] = INVALID_HANDLE; }
+            if(m_hRSI[i]     != INVALID_HANDLE) { IndicatorRelease(m_hRSI[i]);     m_hRSI[i]     = INVALID_HANDLE; }
+            if(m_hBB[i]      != INVALID_HANDLE) { IndicatorRelease(m_hBB[i]);      m_hBB[i]      = INVALID_HANDLE; }
+            if(m_hMACD[i]    != INVALID_HANDLE) { IndicatorRelease(m_hMACD[i]);    m_hMACD[i]    = INVALID_HANDLE; }
+            if(m_hStoch[i]   != INVALID_HANDLE) { IndicatorRelease(m_hStoch[i]);   m_hStoch[i]   = INVALID_HANDLE; }
+
+            failCount++;
+            continue;
          }
       }
 
-      Print("FilterLib v5: 全部指標handle建立完成");
+      if(failCount > 0)
+         PrintFormat("FilterLib v5: 指標handle建立完成，%d/%d 個商品被跳過", failCount, SYMBOL_COUNT);
+      else
+         Print("FilterLib v5: 全部指標handle建立完成");
+
       return true;
    }
 
