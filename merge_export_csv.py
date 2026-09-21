@@ -105,7 +105,16 @@ def merge_one(symbol: str, tf: str, files: list, delete_source: bool):
     merged = merged.sort_values("datetime").reset_index(drop=True)
 
     out_path = MERGED_FOLDER / f"{symbol}_{tf}_MERGED_ALL_DATA.csv"
-    merged.to_csv(out_path, index=False, encoding="utf-8-sig")
+    try:
+        merged.to_csv(out_path, index=False, encoding="utf-8-sig")
+    except PermissionError:
+        # 最常見原因：這個檔案目前在 Excel 或其他程式裡開著被鎖住了。
+        # 跳過這一組，繼續處理其他商品/週期，不要讓整支腳本中斷掉。
+        print(f"  [寫入失敗-權限被拒] {symbol} {tf}: {out_path.name} 可能正被 Excel 或其他程式開著，先關掉再重跑。已跳過此組。")
+        return
+    except OSError as e:
+        print(f"  [寫入失敗] {symbol} {tf}: {out_path.name} - {e}。已跳過此組。")
+        return
     print(f"  {symbol} {tf}: 合併 {len(files_sorted)} 份快照 -> {len(merged)} 根K棒 -> {out_path.name}")
 
     if not delete_source:
