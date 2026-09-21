@@ -3,10 +3,15 @@
 # （檔名格式：{symbol}_{tf}_ALL_DATA_{yyyymmdd}_{hhmmss}.csv）合併成
 # 一份連續、去重、按時間排序的完整資料庫，寫到 merged 子資料夾。
 #
-# 不會刪除或搬動任何原始匯出檔——原始快照全部保留，只是多產生一份
-# 合併後的檔案，供 update_all_data.py 之類的下游腳本讀取更完整的歷史。
+# 預設不會刪除或搬動任何原始匯出檔。只有明確加上 --delete-source 參數，
+# 才會在「確認合併檔案寫入成功且有資料」之後，刪除該組已經被合併進去的
+# 原始快照檔（絕對不會刪除 merged 資料夾或合併後的檔案本身），並且執行前
+# 還會再跳出一次文字確認，避免手滑。
 #
-# 用法：直接執行本腳本即可，會自動掃描資料夾裡出現過的所有商品/週期組合。
+# 用法：
+#   python merge_export_csv.py                  只合併，不刪除任何原始檔（預設、安全）
+#   python merge_export_csv.py --delete-source   合併後刪除已成功合併的原始快照，釋放硬碟空間
+import argparse
 import pandas as pd
 from pathlib import Path
 import re
@@ -69,12 +74,13 @@ def group_files_by_symbol_tf():
     return groups
 
 
-def merge_one(symbol: str, tf: str, files: list):
+def merge_one(symbol: str, tf: str, files: list, delete_source: bool):
     # 按檔名時間戳記排序（舊到新），後面讀進來的重複K棒會覆蓋前面的，
     # 等於「同一根K棒以較新一次匯出的數值為準」
     files_sorted = sorted(files, key=lambda x: x[0])
 
     frames = []
+    usable_paths = []
     for _, path in files_sorted:
         df = read_csv_any_encoding(path)
         if df is None:
@@ -85,6 +91,7 @@ def merge_one(symbol: str, tf: str, files: list):
             print(f"  [跳過] 找不到日期欄: {path.name}")
             continue
         frames.append(df)
+        usable_paths.append(path)
 
     if not frames:
         print(f"  {symbol} {tf}: 沒有任何可用資料，跳過")
@@ -101,8 +108,41 @@ def merge_one(symbol: str, tf: str, files: list):
     merged.to_csv(out_path, index=False, encoding="utf-8-sig")
     print(f"  {symbol} {tf}: 合併 {len(files_sorted)} 份快照 -> {len(merged)} 根K棒 -> {out_path.name}")
 
+    if not delete_source:
+        return
+
+    # 刪除前再次確認合併檔案真的寫成功、而且有資料，才刪對應的原始快照。
+    # 只刪這一組「已經成功讀進 merged 檔案」的來源檔，讀取失敗被跳過的
+    # 檔案不會被刪（留著方便你事後排查為什麼讀不到）。
+    if not out_path.exists() or out_path.stat().st_size == 0 or len(merged) == 0:
+        print(f"  [安全跳過刪除] {symbol} {tf}: 合併檔案看起來不對勁，保留全部原始快照")
+        return
+
+    freed_bytes = 0
+    deleted = 0
+    for path in usable_paths:
+        try:
+            freed_bytes += path.stat().st_size
+            path.unlink()
+            deleted += 1
+        except OSError as e:
+            print(f"  [刪除失敗] {path.name}: {e}")
+
+    print(f"  {symbol} {tf}: 已刪除 {deleted} 份原始快照，釋放約 {freed_bytes/1024/1024:.1f} MB")
+
 
 def main():
+    parser = argparse.ArgumentParser(description="合併 ExportCSV 匯出快照")
+    parser.add_argument(
+        "--delete-source", action="store_true",
+        help="合併成功後刪除已合併的原始快照檔（預設不刪）"
+    )
+    parser.add_argument(
+        "--yes", action="store_true",
+        help="搭配 --delete-source 使用，跳過刪除前的文字確認（自動化執行用）"
+    )
+    args = parser.parse_args()
+
     if not SOURCE_FOLDER.exists():
         print(f"找不到資料夾: {SOURCE_FOLDER}")
         return
@@ -112,10 +152,22 @@ def main():
         print(f"{SOURCE_FOLDER} 裡沒有符合命名規則的匯出檔案（{{symbol}}_{{tf}}_ALL_DATA_{{時間戳記}}.csv）")
         return
 
-    print(f"掃描到 {len(groups)} 組 商品/週期 組合，開始合併（原始檔案不會被刪除或搬動）...")
+    delete_source = args.delete_source
+    if delete_source and not args.yes:
+        total_files = sum(len(f) for f in groups.values())
+        confirm = input(
+            f"即將在合併成功後刪除 {total_files} 份原始快照檔（merged 資料夾跟合併結果不會動）。"
+            f"確定嗎？輸入 yes 繼續，其他任意鍵取消刪除（仍會照常合併）: "
+        )
+        if confirm.strip().lower() != "yes":
+            print("已取消刪除，僅執行合併。")
+            delete_source = False
+
+    action_desc = "合併並刪除已合併的原始快照" if delete_source else "合併（原始檔案不會被刪除或搬動）"
+    print(f"掃描到 {len(groups)} 組 商品/週期 組合，開始{action_desc}...")
     for (symbol, tf), files in sorted(groups.items()):
         print(f"處理 {symbol} {tf}（{len(files)} 份快照）...")
-        merge_one(symbol, tf, files)
+        merge_one(symbol, tf, files, delete_source)
 
     print(f"\n全部完成，合併結果都在 {MERGED_FOLDER}")
 
