@@ -100,8 +100,6 @@ private:
    int      m_hMACD[20];
    int      m_hStoch[20];
 
-   datetime m_lastBarTime[20];
-   bool     m_barUsed[20];
    datetime m_lastBarTimeF[20];
 
    datetime lastResetDay;
@@ -465,8 +463,6 @@ public:
          m_hBB[i]          = INVALID_HANDLE;
          m_hMACD[i]        = INVALID_HANDLE;
          m_hStoch[i]       = INVALID_HANDLE;
-         m_lastBarTime[i]  = 0;
-         m_barUsed[i]      = false;
          m_lastBarTimeF[i] = 0;
       }
    }
@@ -517,49 +513,6 @@ public:
       }
 
       Print("FilterLib v5: 所有指標handle已釋放");
-   }
-
-   //-----------------------------------------------------------------
-   // GetSignal（供EA TryOpenPositions）
-   //-----------------------------------------------------------------
-   ENUM_SIG GetSignal(const string sym, bool confirm=true)
-   {
-      int idx = SymIdx(sym);
-      if(idx < 0) return SIG_NONE;
-      return _calcSignalShift(idx, confirm ? 1 : 0);
-   }
-
-   //-----------------------------------------------------------------
-   // CheckNewBar / MarkBarUsed / IsBarUsed（供EA開倉邏輯）
-   //-----------------------------------------------------------------
-   bool CheckNewBar(const string sym)
-   {
-      int idx = SymIdx(sym);
-      if(idx < 0) return false;
-
-      datetime barTime[1];
-      if(CopyTime(sym, m_tf, 0, 1, barTime) != 1) return false;
-
-      if(barTime[0] != m_lastBarTime[idx])
-      {
-         m_lastBarTime[idx] = barTime[0];
-         m_barUsed[idx]     = false;
-         return true;
-      }
-      return false;
-   }
-
-   void MarkBarUsed(const string sym)
-   {
-      int idx = SymIdx(sym);
-      if(idx >= 0) m_barUsed[idx] = true;
-   }
-
-   bool IsBarUsed(const string sym)
-   {
-      int idx = SymIdx(sym);
-      if(idx < 0) return true;
-      return m_barUsed[idx];
    }
 
    //-----------------------------------------------------------------
