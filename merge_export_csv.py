@@ -28,6 +28,16 @@ FILENAME_RE = re.compile(
     re.I
 )
 
+MERGED_FILENAME_RE = re.compile(
+    r"^(?P<symbol>.+)_(?P<tf>[A-Z]+\d*)_MERGED_ALL_DATA\.csv$",
+    re.I
+)
+
+# 增量狀態檔：記錄每個 商品/週期 在 merged 資料庫裡目前最新一根K棒的時間，
+# 給 GDH_BatchExportSelected 讀取，決定該商品/週期用 --since 只抓新資料，
+# 還是（資料庫裡還沒有時）走整批回補。
+STATE_FILE = "_last_bar_state.csv"
+
 
 def read_csv_any_encoding(path: Path):
     for enc in ["utf-8-sig", "utf-8", "big5", "cp950"]:
@@ -60,6 +70,52 @@ def normalize_columns(df: pd.DataFrame):
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
     df = df.dropna(subset=["datetime"])
     return df
+
+
+def read_last_datetime(path: Path):
+    """有效率地只讀檔案結尾一小段，取得最後一行的日期時間，不用整份載入記憶體。"""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            filesize = f.tell()
+            chunk_size = min(8192, filesize)
+            f.seek(-chunk_size, 2)
+            tail = f.read().decode("utf-8-sig", errors="ignore")
+        lines = [l for l in tail.splitlines() if l.strip()]
+        if not lines:
+            return None
+        last_line = lines[-1]
+        first_field = last_line.split(",")[0]
+        dt = pd.to_datetime(first_field, errors="coerce")
+        if pd.isna(dt):
+            return None
+        return dt
+    except OSError:
+        return None
+
+
+def write_last_bar_state():
+    """掃描 merged 資料夾裡目前所有合併檔（不限這次執行有沒有更新到），
+    寫出每個 商品/週期 目前資料庫最新K棒時間，供匯出巨集判斷要不要用 --since。"""
+    rows = []
+    for f in MERGED_FOLDER.glob("*_MERGED_ALL_DATA.csv"):
+        m = MERGED_FILENAME_RE.match(f.name)
+        if not m:
+            continue
+        dt = read_last_datetime(f)
+        if dt is None:
+            continue
+        rows.append({
+            "Symbol": m.group("symbol"),
+            "TF": m.group("tf").upper(),
+            "LastDateTime": dt.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+    state_path = MERGED_FOLDER / STATE_FILE
+    pd.DataFrame(rows, columns=["Symbol", "TF", "LastDateTime"]).to_csv(
+        state_path, index=False, encoding="utf-8-sig"
+    )
+    print(f"\n已更新增量狀態檔（{len(rows)} 組）: {state_path}")
 
 
 def group_files_by_symbol_tf():
@@ -159,6 +215,9 @@ def main():
     groups = group_files_by_symbol_tf()
     if not groups:
         print(f"{SOURCE_FOLDER} 裡沒有符合命名規則的匯出檔案（{{symbol}}_{{tf}}_ALL_DATA_{{時間戳記}}.csv）")
+        # 就算這次沒有新快照可合併，merged 資料夾裡的舊資料還是有效的，
+        # 照樣把增量狀態檔寫出來，供匯出巨集使用。
+        write_last_bar_state()
         return
 
     delete_source = args.delete_source
@@ -178,6 +237,7 @@ def main():
         print(f"處理 {symbol} {tf}（{len(files)} 份快照）...")
         merge_one(symbol, tf, files, delete_source)
 
+    write_last_bar_state()
     print(f"\n全部完成，合併結果都在 {MERGED_FOLDER}")
 
 
