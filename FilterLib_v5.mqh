@@ -455,15 +455,14 @@ public:
       fx_rules[23].symbol="US30.CASH";  fx_rules[23].sl_pips=15000.00; fx_rules[23].tp_pips=30000.00; fx_rules[23].atr_threshold=11000.00; fx_rules[23].lot_size=0.01;
       fx_rules[24].symbol="JP225.CASH"; fx_rules[24].sl_pips=18000.00; fx_rules[24].tp_pips=36000.00; fx_rules[24].atr_threshold=13000.00; fx_rules[24].lot_size=0.01;
 
-      // ⚠️⚠️⚠️ PLACEHOLDER — 一勞永逸先把金屬/石油/天然氣加進來備用 ⚠️⚠️⚠️
-      // 完全沒有回測校準，SL/TP/ATR門檻是保守估計值，lot_size 固定最小 0.01。
-      // 這幾個商品的 SYMBOL_DIGITS 大多是 2 或 3（PipSize()兩者都算0.01，
-      // 所以換算方式跟外匯不同但巧合地用同一套公式不會離譜），但還是要用
-      // check_symbols.py 或 Print(SymbolInfoInteger(sym,SYMBOL_DIGITS))
-      // 實際跑一次帳戶驗證，確認跟下面假設的一致再上線。
-      // 換算成實際價格距離大約是：
-      // XAUUSD(金) ≈15、XAGUSD(銀) ≈0.5、XPTUSD(鉑) ≈15、XPDUSD(鈀) ≈30、
-      // USOIL/UKOIL(原油) ≈1.0、NATGAS(天然氣) ≈0.1。
+      // ⚠️ PLACEHOLDER — 一勞永逸先把金屬/石油/天然氣加進來備用 ⚠️
+      // ✅ 已用 check_symbols.py 連線實際帳戶驗證：US100/US500/US30/JP225/
+      // XAUUSD/XPTUSD/XPDUSD 是 digits=2，XAGUSD/USOIL/UKOIL/NATGAS 是
+      // digits=3，PipSize() 兩種都算 0.01，換算方式跟下面的數字一致，不用改。
+      // 換算成實際價格距離：XAUUSD(金)≈15、XAGUSD(銀)≈0.5、XPTUSD(鉑)≈15、
+      // XPDUSD(鈀)≈30、USOIL/UKOIL(原油)≈1.0、NATGAS(天然氣)≈0.1。
+      // ⚠️ 但這組距離本身還是未回測估計值，只保證換算不會離譜，正式交易前
+      // 還是要用實際回測數據校準。
       // MultiCurrency_EA.mq5 目前沒有交易這幾個商品（Inp_Sym1~11沒有它們），
       // 這裡只是先備用，要真的交易還要去 EA 加 Inp_SymXX 輸入欄位。
       fx_rules[25].symbol="XAUUSD";     fx_rules[25].sl_pips=1500.00; fx_rules[25].tp_pips=3000.00; fx_rules[25].atr_threshold=1100.00; fx_rules[25].lot_size=0.01;
