@@ -11,10 +11,11 @@
 //--------------------------------------------------------------------
 // 支援幣別
 //--------------------------------------------------------------------
-const int SYMBOL_COUNT = 36;
+const int SYMBOL_COUNT = 53;
 
 const string SYMBOLS[SYMBOL_COUNT] = {
 
+   // ── 外匯（原20組 + Excel回測確認過的 EURUSD/USDCNH）──
    "AUDJPY",
    "AUDSGD",
    "AUDUSD",
@@ -23,6 +24,7 @@ const string SYMBOLS[SYMBOL_COUNT] = {
    "EURDKK",
    "EURGBP",
    "EURJPY",
+   "EURUSD",
    "GBPJPY",
    "GBPUSD",
    "NOKJPY",
@@ -32,12 +34,14 @@ const string SYMBOLS[SYMBOL_COUNT] = {
    "SEKJPY",
    "USDCAD",
    "USDCHF",
+   "USDCNH",
    "USDJPY",
    "USDMXN",
    "USDTRY",
-   // ⚠️ 以下7個是預留（金屬/石油/天然氣），一勞永逸先擴充進來備用，
+   // ⚠️ 以下皆是預留（金屬/能源/軟商品/指數/加密貨幣），一勞永逸先擴充進來備用，
    // 目前 MultiCurrency_EA.mq5 沒有交易這些商品，加進來只是讓 F段
    // 背景監控涵蓋得到；要實際交易還是要去 fx_rules[] 校準SL/TP數字。
+   // ── 金屬/能源 ──
    "XAUUSD",
    "XAGUSD",
    "XPTUSD",
@@ -45,17 +49,33 @@ const string SYMBOLS[SYMBOL_COUNT] = {
    "USOIL.cash",
    "UKOIL.cash",
    "NATGAS.cash",
-   // ⚠️ 以下9個是預留的股指（美股三大指數/歐洲主要指數/亞太主要指數），
-   // 同樣只擴充F段背景監控涵蓋範圍，要實際交易一樣要去 fx_rules[] 校準SL/TP數字。
-   "US30.cash",
-   "NAS100.cash",
-   "SPX500.cash",
-   "GER40.cash",
-   "UK100.cash",
-   "FRA40.cash",
-   "JPN225.cash",
+   // ── 軟商品（FTMO Commodities頁確認）──
+   "COCOA.c",
+   "COFFEE.c",
+   "SOYBEAN.c",
+   "WHEAT.c",
+   // ── 股指（依 FTMO Indices頁實際代號校正，取代先前猜錯的 NAS100/SPX500/JPN225/FRA40）──
    "AUS200.cash",
-   "HK50.cash"
+   "US30.cash",
+   "EU50.cash",
+   "GER40.cash",
+   "HK50.cash",
+   "JP225.cash",
+   "US100.cash",
+   "US500.cash",
+   "UK100.cash",
+   "US2000.cash",
+   // ── 加密貨幣（FTMO Crypto頁）──
+   "BTCUSD",
+   "DASHUSD",
+   "ETHUSD",
+   "LTCUSD",
+   "XRPUSD",
+   "XMRUSD",
+   "NEOUSD",
+   "ADAUSD",
+   "DOTUSD",
+   "DOGEUSD"
 };
 
 //--------------------------------------------------------------------
