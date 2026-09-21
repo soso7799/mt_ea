@@ -11,8 +11,10 @@
 //--------------------------------------------------------------------
 // 支援幣別
 //--------------------------------------------------------------------
-const string SYMBOLS[20] = {
-   
+const int SYMBOL_COUNT = 36;
+
+const string SYMBOLS[SYMBOL_COUNT] = {
+
    "AUDJPY",
    "AUDSGD",
    "AUDUSD",
@@ -32,7 +34,28 @@ const string SYMBOLS[20] = {
    "USDCHF",
    "USDJPY",
    "USDMXN",
-   "USDTRY"
+   "USDTRY",
+   // ⚠️ 以下7個是預留（金屬/石油/天然氣），一勞永逸先擴充進來備用，
+   // 目前 MultiCurrency_EA.mq5 沒有交易這些商品，加進來只是讓 F段
+   // 背景監控涵蓋得到；要實際交易還是要去 fx_rules[] 校準SL/TP數字。
+   "XAUUSD",
+   "XAGUSD",
+   "XPTUSD",
+   "XPDUSD",
+   "USOIL.cash",
+   "UKOIL.cash",
+   "NATGAS.cash",
+   // ⚠️ 以下9個是預留的股指（美股三大指數/歐洲主要指數/亞太主要指數），
+   // 同樣只擴充F段背景監控涵蓋範圍，要實際交易一樣要去 fx_rules[] 校準SL/TP數字。
+   "US30.cash",
+   "NAS100.cash",
+   "SPX500.cash",
+   "GER40.cash",
+   "UK100.cash",
+   "FRA40.cash",
+   "JPN225.cash",
+   "AUS200.cash",
+   "HK50.cash"
 };
 
 //--------------------------------------------------------------------
@@ -71,7 +94,7 @@ struct SymbolRule
 //--------------------------------------------------------------------
 int SymIdx(const string sym)
 {
-   for(int i=0; i<20; i++)
+   for(int i=0; i<SYMBOL_COUNT; i++)
       if(SYMBOLS[i]==sym) return i;
    return -1;
 }
@@ -93,14 +116,14 @@ private:
    long             magic;
    ENUM_TIMEFRAMES  m_tf;
 
-   int      m_hEmaFast[20];
-   int      m_hEmaSlow[20];
-   int      m_hRSI[20];
-   int      m_hBB[20];
-   int      m_hMACD[20];
-   int      m_hStoch[20];
+   int      m_hEmaFast[SYMBOL_COUNT];
+   int      m_hEmaSlow[SYMBOL_COUNT];
+   int      m_hRSI[SYMBOL_COUNT];
+   int      m_hBB[SYMBOL_COUNT];
+   int      m_hMACD[SYMBOL_COUNT];
+   int      m_hStoch[SYMBOL_COUNT];
 
-   datetime m_lastBarTimeF[20];
+   datetime m_lastBarTimeF[SYMBOL_COUNT];
 
    datetime lastResetDay;
    bool     forceClosedToday;
@@ -142,12 +165,13 @@ private:
       string s = sym;
       StringToUpper(s);
 
-      // 逐一比對已知的 20 個核心幣別代碼，而不是抓「第一段連續6個字母」，
-      // 否則像 "mUSDJPY" 這種帶前綴的券商命名，會先比對到錯誤的 "MUSDJP"
+      // 逐一比對已知的核心幣別代碼（6碼），而不是抓「第一段連續6個字母」，
+      // 否則像 "mUSDJPY" 這種帶前綴的券商命名，會先比對到錯誤的 "MUSDJP"。
+      // 註：金屬/能源/指數代碼非6碼，本比對法本來就比不到，維持走 idx<0 分支即可。
       for(int i=0; i<=StringLen(s)-6; i++)
       {
          string part = StringSubstr(s, i, 6);
-         for(int k=0; k<20; k++)
+         for(int k=0; k<SYMBOL_COUNT; k++)
          {
             if(part == SYMBOLS[k])
                return part;
@@ -455,7 +479,7 @@ public:
 
       InitRules();
 
-      for(int i=0; i<20; i++)
+      for(int i=0; i<SYMBOL_COUNT; i++)
       {
          m_hEmaFast[i]     = INVALID_HANDLE;
          m_hEmaSlow[i]     = INVALID_HANDLE;
@@ -472,7 +496,7 @@ public:
    //-----------------------------------------------------------------
    bool InitIndicators()
    {
-      for(int i=0; i<20; i++)
+      for(int i=0; i<SYMBOL_COUNT; i++)
       {
          string sym = SYMBOLS[i];
          m_hEmaFast[i] = iMA(sym, m_tf, EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
@@ -502,7 +526,7 @@ public:
 
    void DeinitIndicators()
    {
-      for(int i=0; i<20; i++)
+      for(int i=0; i<SYMBOL_COUNT; i++)
       {
          if(m_hEmaFast[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaFast[i]); m_hEmaFast[i] = INVALID_HANDLE; }
          if(m_hEmaSlow[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaSlow[i]); m_hEmaSlow[i] = INVALID_HANDLE; }
