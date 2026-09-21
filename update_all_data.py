@@ -9,6 +9,10 @@ import re
 # （GDH_BatchExportSelected）是把 CSV 匯出到 D:\資料查詢\ExportCSV\，
 # 兩個資料夾完全不同，導致這支腳本永遠讀不到新資料。已改成正確路徑。
 DATA_FOLDER = Path(r"D:\資料查詢\ExportCSV")
+# merge_export_csv.py 把同一個商品/週期的所有匯出快照合併成一份連續、去重
+# 的完整歷史，放在這個子資料夾。有合併檔就優先用它（資料更完整、更連續），
+# 只有在還沒跑過合併腳本時才退回去找單一份最新的原始快照。
+MERGED_FOLDER = DATA_FOLDER / "merged"
 OUTPUT_FOLDER = Path(r"D:\整合計畫\update_output")  # 輸出目錄
 OUTPUT_FOLDER.mkdir(exist_ok=True)
 
@@ -21,6 +25,10 @@ SYMBOLS = [
 RECENT_LOOKBACK_BARS = 288  # M5 x 288 = 24小時
 
 def find_latest_m5(sym: str):
+    merged_path = MERGED_FOLDER / f"{sym}_M5_MERGED_ALL_DATA.csv"
+    if merged_path.exists():
+        return merged_path
+
     pattern = re.compile(rf"{re.escape(sym)}_M5_ALL_DATA_(\d{{8}})_(\d{{6}})\.csv", re.I)
     cands = []
     for f in DATA_FOLDER.glob(f"{sym}_M5_ALL_DATA_*.csv"):
