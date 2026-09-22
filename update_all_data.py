@@ -1,19 +1,18 @@
 # update_all_data.py
-# 從 D:\資料查詢\ExportCSV 抓最新資料，輸出成 Excel 可讀的 CSV
+# 從 D:\整合計畫\整理後\ExportCSV 抓最新資料，輸出成 Excel 可讀的 CSV
 import pandas as pd
 from pathlib import Path
 from datetime import date, datetime
 import re
 
-# ⚠️ 原本寫死指到 D:\historical_data，但實際的批次匯出巨集
-# （GDH_BatchExportSelected）是把 CSV 匯出到 D:\資料查詢\ExportCSV\，
-# 兩個資料夾完全不同，導致這支腳本永遠讀不到新資料。已改成正確路徑。
-DATA_FOLDER = Path(r"D:\資料查詢\ExportCSV")
+# 整理後統一路徑：跟 merge_export_csv.py / GDH_BatchExportSelected 用同一個
+# D:\整合計畫\整理後\ 資料夾，避免像先前 D:\historical_data 那樣三邊路徑對不上。
+DATA_FOLDER = Path(r"D:\整合計畫\整理後\ExportCSV")
 # merge_export_csv.py 把同一個商品/週期的所有匯出快照合併成一份連續、去重
 # 的完整歷史，放在這個子資料夾。有合併檔就優先用它（資料更完整、更連續），
 # 只有在還沒跑過合併腳本時才退回去找單一份最新的原始快照。
 MERGED_FOLDER = DATA_FOLDER / "merged"
-OUTPUT_FOLDER = Path(r"D:\整合計畫\update_output")  # 輸出目錄
+OUTPUT_FOLDER = Path(r"D:\整合計畫\整理後\update_output")  # 輸出目錄
 OUTPUT_FOLDER.mkdir(exist_ok=True)
 
 SYMBOLS = [

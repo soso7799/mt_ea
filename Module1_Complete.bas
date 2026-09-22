@@ -12,7 +12,7 @@
 
 '====================================================================
 ' 批次匯出「市場清單」裡打勾的商品(C欄) × 打勾的週期(D欄)，
-' 每個組合都匯出一份CSV到 D:\資料查詢\ExportCSV\
+' 每個組合都匯出一份CSV到 D:\整合計畫\整理後\ExportCSV\
 '
 ' 用法：
 '   1. 「市場清單」A欄旁的C欄，想匯出的商品打 X
@@ -22,7 +22,7 @@
 '      (量化分析引擎目前只支援這4個週期，其餘週期只會單純匯出CSV，不會進優化分析)
 '
 ' ⚠️ 這版本改成支援增量更新：
-'   - 匯出前會先讀 D:\資料查詢\ExportCSV\merged\_last_bar_state.csv
+'   - 匯出前會先讀 D:\整合計畫\整理後\ExportCSV\merged\_last_bar_state.csv
 '     （由 merge_export_csv.py 每次合併後自動產生），裡面記錄每個
 '     商品/週期在資料庫裡目前最新一根K棒的時間。
 '   - 該商品/週期「已經有資料」的話，只帶 --since 抓這個時間點之後的
@@ -133,9 +133,9 @@ Public Sub GDH_BatchExportSelected()
     If unitCode = "" Then unitCode = "Y"
 
     Dim folderPath As String
-    folderPath = "D:\資料查詢\ExportCSV\"
+    folderPath = "D:\整合計畫\整理後\ExportCSV\"
     If Dir$(folderPath, vbDirectory) = "" Then
-        If Dir$("D:\資料查詢", vbDirectory) = "" Then MkDir "D:\資料查詢"
+        If Dir$("D:\整合計畫\整理後", vbDirectory) = "" Then MkDir "D:\整合計畫\整理後"
         MkDir folderPath
     End If
 
@@ -173,7 +173,7 @@ Public Sub GDH_BatchExportSelected()
 
     Dim pythonExe As String, scriptFile As String
     pythonExe = Environ$("LOCALAPPDATA") & "\hermes\hermes-agent\venv\Scripts\python.exe"
-    scriptFile = "D:\資料查詢\gordon_mt5_incremental.py"
+    scriptFile = "D:\整合計畫\整理後\gordon_mt5_incremental.py"
     If Dir$(scriptFile) = "" Then scriptFile = ThisWorkbook.Path & "\gordon_mt5_incremental.py"
 
     If Dir$(pythonExe) = "" Then
@@ -223,12 +223,12 @@ Public Sub GDH_BatchExportSelected()
             DoEvents
 
             Dim outputCsv As String
-            outputCsv = "D:\資料查詢\mt_export_" & tfName & ".csv"
+            outputCsv = "D:\整合計畫\整理後\mt_export_" & tfName & ".csv"
 
             Dim command As String
             If isIncremental Then
                 command = GDH_Quote(pythonExe) & " " & GDH_Quote(scriptFile) & _
-                    " --db " & GDH_Quote("D:\資料查詢") & _
+                    " --db " & GDH_Quote("D:\整合計畫\整理後") & _
                     " --symbol " & GDH_Quote(symbolStr) & _
                     " --timeframe " & GDH_Quote(tfName) & _
                     " --since " & GDH_Quote(sinceValue) & _
@@ -236,7 +236,7 @@ Public Sub GDH_BatchExportSelected()
                 incrementalCount = incrementalCount + 1
             Else
                 command = GDH_Quote(pythonExe) & " " & GDH_Quote(scriptFile) & _
-                    " --db " & GDH_Quote("D:\資料查詢") & _
+                    " --db " & GDH_Quote("D:\整合計畫\整理後") & _
                     " --symbol " & GDH_Quote(symbolStr) & _
                     " --timeframe " & GDH_Quote(tfName) & _
                     " --amount " & CStr(amount) & _
@@ -316,7 +316,7 @@ End Sub
 '   1. 呼叫上面的 GDH_BatchExportSelected，匯出「市場清單」裡打勾的
 '      商品(C欄) x 週期(D欄)組合
 '   2. 執行 merge_export_csv.py --delete-source --yes：
-'      把 D:\資料查詢\ExportCSV 底下所有商品/週期的快照合併進 merged
+'      把 D:\整合計畫\整理後\ExportCSV 底下所有商品/週期的快照合併進 merged
 '      資料夾，合併成功的舊快照會被刪除釋放硬碟空間（merged資料夾本身
 '      跟合併結果絕對不會被刪）
 '   3. 執行 update_all_data.py：從 merged 資料夾產生
@@ -325,9 +325,9 @@ End Sub
 '      「儀表板總表」畫面刷新成最新資料
 '
 ' 使用前置作業（只要做一次）：
-'   - 把 merge_export_csv.py 放到 D:\資料查詢\merge_export_csv.py
+'   - 把 merge_export_csv.py 放到 D:\整合計畫\整理後\merge_export_csv.py
 '     （找不到的話會退而求其次找 ThisWorkbook.Path 底下有沒有）
-'   - update_all_data.py 沿用 Module1 既有設定，放在 D:\整合計畫\update_all_data.py
+'   - update_all_data.py 沿用 Module1 既有設定，放在 D:\整合計畫\整理後\update_all_data.py
 '
 ' 安裝方式：回工作表，插入→按鈕（表單控制項），指派巨集選 GDH_UpdateEverything
 '====================================================================
@@ -353,10 +353,10 @@ Public Sub GDH_UpdateEverything()
     End If
 
     Dim mergeScript As String
-    mergeScript = "D:\資料查詢\merge_export_csv.py"
+    mergeScript = "D:\整合計畫\整理後\merge_export_csv.py"
     If Dir$(mergeScript) = "" Then mergeScript = ThisWorkbook.Path & "\merge_export_csv.py"
     If Dir$(mergeScript) = "" Then
-        MsgBox "找不到 merge_export_csv.py，請先放到 D:\資料查詢\ 底下。", vbCritical, "環境錯誤"
+        MsgBox "找不到 merge_export_csv.py，請先放到 D:\整合計畫\整理後\ 底下。", vbCritical, "環境錯誤"
         Application.StatusBar = False
         Exit Sub
     End If
@@ -379,7 +379,7 @@ Public Sub GDH_UpdateEverything()
     DoEvents
 
     Dim updateScript As String
-    updateScript = "D:\整合計畫\update_all_data.py"
+    updateScript = "D:\整合計畫\整理後\update_all_data.py"
     If Dir$(updateScript) = "" Then
         MsgBox "找不到 update_all_data.py：" & updateScript, vbCritical, "環境錯誤"
         Application.StatusBar = False

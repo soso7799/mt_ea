@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 from collections import defaultdict
 
-SOURCE_FOLDER = Path(r"D:\資料查詢\ExportCSV")
+SOURCE_FOLDER = Path(r"D:\整合計畫\整理後\ExportCSV")
 MERGED_FOLDER = SOURCE_FOLDER / "merged"
 MERGED_FOLDER.mkdir(exist_ok=True)
 
