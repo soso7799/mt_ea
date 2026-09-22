@@ -19,7 +19,10 @@ from collections import defaultdict
 
 SOURCE_FOLDER = Path(r"D:\整合計畫\整理後\ExportCSV")
 MERGED_FOLDER = SOURCE_FOLDER / "merged"
-MERGED_FOLDER.mkdir(exist_ok=True)
+# parents=True：ExportCSV 本身還沒被匯出巨集建出來時（例如全新環境、
+# 還沒跑過批次匯出就先跑這支腳本），一次把中間缺的資料夾都補上，
+# 不會因為上層資料夾不存在就丟 FileNotFoundError。
+MERGED_FOLDER.mkdir(parents=True, exist_ok=True)
 
 # 檔名格式：{symbol}_{tf}_ALL_DATA_{yyyymmdd}_{hhmmss}.csv
 # symbol 可能含點（例如 US500.cash），tf 是純字母數字（M5/H1/H4/D1/M15...）
