@@ -397,14 +397,40 @@ Public Sub GDH_UpdateEverything()
     End If
 
     ' ---------- 步驟4：刷新畫面 ----------
+    ' Update關卡 / RefreshDashboard 是活在「另一個」活頁簿裡（含「關卡」「儀表板
+    ' 總表」分頁的那個資料儀表板檔），不是這個 Gordon_FTMO_Data_Console 活頁簿，
+    ' 所以不能直接 Call，要用 Application.Run 指定活頁簿名稱去呼叫。
+    ' 這裡用「掃描目前所有開著的活頁簿，找出有『儀表板總表』分頁的那個」，
+    ' 不寫死檔名，避免檔名帶版本尾巴（例如 "(1)"）時對不上。
     Application.StatusBar = "步驟 4/4：刷新畫面中..."
     DoEvents
 
-    Application.ScreenUpdating = False
-    Call Update關卡
-    ThisWorkbook.Sheets("儀表板總表").Activate
-    Application.Run "RefreshDashboard"
-    Application.ScreenUpdating = True
+    Dim wbDash As Workbook, wbTest As Workbook
+    Dim shTest As Worksheet, hasSheet As Boolean
+    For Each wbTest In Application.Workbooks
+        hasSheet = False
+        On Error Resume Next
+        Set shTest = wbTest.Sheets("儀表板總表")
+        hasSheet = Not shTest Is Nothing
+        On Error GoTo 0
+        Set shTest = Nothing
+        If hasSheet Then
+            Set wbDash = wbTest
+            Exit For
+        End If
+    Next wbTest
+
+    If wbDash Is Nothing Then
+        MsgBox "找不到含有「儀表板總表」分頁的活頁簿，請確認那個資料儀表板檔案有打開。" & vbCrLf & _
+               "（前3步已經完成，只差這步刷新畫面沒做，資料本身是新的）", _
+               vbExclamation, "步驟4找不到儀表板活頁簿"
+    Else
+        Application.ScreenUpdating = False
+        Application.Run "'" & wbDash.Name & "'!Update關卡"
+        wbDash.Sheets("儀表板總表").Activate
+        Application.Run "'" & wbDash.Name & "'!RefreshDashboard"
+        Application.ScreenUpdating = True
+    End If
 
     Application.StatusBar = False
     MsgBox "全部更新完成！" & vbCrLf & _
