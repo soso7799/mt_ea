@@ -431,12 +431,12 @@ def main():
         build_summary_table(best, last_trade, member, near)
     except Exception as e:
         print(f"[額外報表] 總整理 失敗：{e}")
-    # 規則比較測試：用 merged 歷史資料在背景跑（不卡 Excel；24 小時內跑過就略過）
+    # 規則比較測試：用 merged 歷史資料直接跑（24 小時內跑過就略過；第一次約需幾分鐘）
     try:
         import strategy_test
-        print(f"[規則測試] {strategy_test.launch_background()}")
+        strategy_test.main()
     except Exception as e:
-        print(f"[規則測試] 啟動失敗：{e}")
+        print(f"[規則測試] 失敗：{e}")
 
 if __name__ == "__main__":
     main()

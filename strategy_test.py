@@ -21,7 +21,7 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
   update_output\\strategy_test.csv      每個 商品×週期×規則：最佳參數、前70%/後30% 成績、判定
   update_output\\strategy_test_all.csv  每一組參數的全期成績（給想細看的人）
 
-用法：由 build_extra_tables.py 在背景自動啟動（不會卡住 Excel）；24 小時內跑過就不重跑。
+用法：按 Excel「更新關卡」時由 build_extra_tables.py 自動執行；24 小時內跑過就不重跑。
 手動重跑：python strategy_test.py
 """
 import csv
@@ -313,6 +313,10 @@ def main(force=False):
     if not force and os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
         print(f"[規則測試] {RERUN_HOURS} 小時內跑過，這次略過")
         return
+    try:   # 清掉之前背景版本留下的鎖定檔
+        os.remove(os.path.join(OUT_DIR, "strategy_test.running"))
+    except OSError:
+        pass
     mdir = find_merged_dir()
     if not mdir:
         print(f"[規則測試] 找不到 merged 資料夾：{MERGED_DIRS}")
@@ -321,6 +325,7 @@ def main(force=False):
     t0 = time.time()
     best, allr = [], []
     files = sorted(glob.glob(os.path.join(mdir, "*_MERGED_ALL_DATA.csv")))
+    print(f"[規則測試] 資料夾 {mdir}，{len(files)} 個檔", flush=True)
     for fpath in files:
         base = os.path.basename(fpath)[:-len("_MERGED_ALL_DATA.csv")]
         sym, _, tf = base.rpartition("_")
@@ -333,9 +338,9 @@ def main(force=False):
             b, a = test_series(sym, tf, df, spreads.get(sym))
             best += b
             allr += a
-            print(f"[規則測試] {sym} {tf}：{len(df)} 根 OK")
+            print(f"[規則測試] {sym} {tf}：{len(df)} 根 OK（累計 {time.time() - t0:.0f} 秒）", flush=True)
         except Exception as e:
-            print(f"[規則測試] {sym} {tf} 失敗：{e}")
+            print(f"[規則測試] {sym} {tf} 失敗：{e}", flush=True)
     with open(os.path.join(OUT_DIR, "strategy_test_all.csv"), "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(["Symbol", "週期", "規則", "參數", "交易數", "勝率%", "平均報酬%", "總報酬%", "獲利因子", "最大連虧"])
@@ -356,12 +361,12 @@ def launch_background():
     if os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
         return "24 小時內跑過，略過"
     lock = os.path.join(OUT_DIR, "strategy_test.running")
-    if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3 * 3600:
+    if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3600:
         return "上一次還在背景執行中"
     import subprocess
     log = open(os.path.join(OUT_DIR, "log_strategy_test.txt"), "w", encoding="utf-8")
     flags = 0x00000008 | 0x08000000 if os.name == "nt" else 0   # DETACHED_PROCESS | CREATE_NO_WINDOW
-    subprocess.Popen([sys.executable, os.path.abspath(__file__), "--bg"], stdout=log, stderr=log,
+    subprocess.Popen([sys.executable, "-u", os.path.abspath(__file__), "--bg"], stdout=log, stderr=log,
                      cwd=os.path.dirname(os.path.abspath(__file__)), creationflags=flags,
                      env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     return "已在背景啟動（約數分鐘，完成後寫出 strategy_test.csv）"
