@@ -19,6 +19,11 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
   S6 關卡突破+量+多空：H1/M15 收盤突破 亞/歐/美盤高低、今日高低、前日高低（當下已知的關卡）順勢進場；
                       過濾：成交量 >= 前 20 根平均 1 / 1.5 / 2 倍 × 是否要求 11 指標多空同向；停損 1/1.5 × 停利 1.5/2/3 ATR
   S7 關卡反轉+量+多空：同上關卡，盤中刺破但收盤收回（假突破）就反向進場；過濾與出場同 S6
+  ── 11 指標分組（趨勢組：MA/MACD/MTM/布林/BIAS/Keltner；震盪組：RSI/KD/威廉/CCI/PSY，震盪組要反著用）──
+  S8  趨勢組同向持有    ：趨勢組 6 個至少 4/5/6 個同向就持有，不夠就空手
+  S9  趨勢方向+震盪拉回 ：趨勢組 4/5 個向上時，等震盪組 2/3 個「超賣」才買（空方相反）；停損停利 ATR
+  S10 盤整震盪反轉      ：ADX < 20/25（盤整）時，震盪組 2/3 個超賣買、超買賣；停損停利 ATR
+  S11 趨勢順勢進場      ：ADX >= 20/25（有趨勢）時，趨勢組剛轉成 4/5 個同向就順勢進場；停損停利 ATR
 
 輸出：
   update_output\\strategy_test.csv      每個 商品×週期×規則：最佳參數、前70%/後30% 成績、判定
@@ -44,7 +49,11 @@ LEVEL_TFS = ("H1", "M15")        # 關卡突破/反轉只測日內週期
 SESSIONS = {"亞": (3, 12), "歐": (10, 19), "美": (16, 24)}   # FTMO 伺服器時間，跟 make_levels.py 一樣
 VOL_K = [1.0, 1.5, 2.0]          # 成交量 >= 前 20 根平均的幾倍（1.0 = 不過濾）
 LVL_SL, LVL_TP = [1.0, 1.5], [1.5, 2.0, 3.0]
-VERSION = "2"                    # 規則有改就換版本，會強制重跑
+VERSION = "3"                    # 規則有改就換版本，會強制重跑
+TREND_K = [4, 5]                 # 趨勢組 6 個指標至少幾個同方向
+OSC_M = [2, 3]                   # 震盪組 5 個指標至少幾個同時超買/超賣
+ADX_LV = [20, 25]                # ADX 低於＝盤整、高於＝趨勢
+GRP_SL, GRP_TP = [1.5, 2.0], [2.0, 3.0]
 SPLIT = 0.70
 MIN_TRADES_IS, MIN_TRADES_OOS = 30, 20
 RERUN_HOURS = 24
@@ -87,6 +96,53 @@ def vote_series(df):
     pos = np.where(longs > shorts, 1, np.where(shorts > longs, -1, 0))
     pos[m.isna().any(axis=1).values] = 0
     return pos
+
+
+def indicator_groups(df):
+    """11 指標分兩組：
+       趨勢組（方向）：MA、MACD、MTM、布林(價在中軌上/下)、BIAS、Keltner → 各 +1/-1，回傳 多票數, 空票數
+       震盪組（超買超賣，要反著用）：RSI<30、K<20、威廉%R<-80、CCI<-100、PSY<25 算超賣；反之算超買
+       另外回傳 ADX(14)（>=門檻＝有趨勢，<門檻＝盤整）"""
+    c, h, l = df["close"], df["high"], df["low"]
+    tr = {}
+    tr["MA"] = np.sign(c.rolling(8).mean() - c.rolling(50).mean())
+    macd = ema(c, 12) - ema(c, 26)
+    tr["MACD"] = np.sign(macd - ema(macd, 9))
+    tr["MTM"] = np.sign(c.diff(10))
+    tr["BOLL"] = np.sign(c - c.rolling(20).mean())
+    tr["BIAS"] = np.sign(c - c.rolling(50).mean())
+    tr["KELTNER"] = np.sign(c - ema(c, 20))
+    t = pd.DataFrame(tr)
+    t_long, t_short = (t > 0).sum(axis=1).values, (t < 0).sum(axis=1).values
+    t_ok = ~t.isna().any(axis=1).values
+
+    d = c.diff()
+    ag = d.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    al = (-d.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    rsi = 100 - 100 / (1 + ag / al.replace(0, np.nan))
+    ll, hh = l.rolling(9).min(), h.rolling(9).max()
+    k = ((c - ll) / (hh - ll).replace(0, np.nan) * 100).ewm(alpha=1 / 3, adjust=False).mean()
+    hw, lw = h.rolling(14).max(), l.rolling(14).min()
+    wr = (hw - c) / (hw - lw).replace(0, np.nan) * -100
+    tp = (h + l + c) / 3
+    md = tp.rolling(14).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
+    cci = (tp - tp.rolling(14).mean()) / (0.015 * md.replace(0, np.nan))
+    psy = (d > 0).astype(float).rolling(12).sum() / 12 * 100
+    oversold = ((rsi < 30).astype(int) + (k < 20).astype(int) + (wr < -80).astype(int)
+                + (cci < -100).astype(int) + (psy < 25).astype(int)).values
+    overbought = ((rsi > 70).astype(int) + (k > 80).astype(int) + (wr > -20).astype(int)
+                  + (cci > 100).astype(int) + (psy > 75).astype(int)).values
+
+    up, dn = h.diff(), -l.diff()
+    pdm = np.where((up > dn) & (up > 0), up, 0.0)
+    ndm = np.where((dn > up) & (dn > 0), dn, 0.0)
+    trr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    atr_ = trr.ewm(alpha=1 / 14, adjust=False).mean()
+    pdi = 100 * pd.Series(pdm, index=df.index).ewm(alpha=1 / 14, adjust=False).mean() / atr_
+    ndi = 100 * pd.Series(ndm, index=df.index).ewm(alpha=1 / 14, adjust=False).mean() / atr_
+    dx = 100 * (pdi - ndi).abs() / (pdi + ndi).replace(0, np.nan)
+    adx = dx.ewm(alpha=1 / 14, adjust=False).mean().fillna(0).values
+    return t_long, t_short, t_ok, oversold, overbought, adx
 
 
 def atr(df, n=14):
@@ -353,6 +409,44 @@ def test_series(sym, tf, df, spread):
         s4[f"EMA{f_}/{s_}"] = run_position(o, want, cost_frac)
     fams["S4 均線交叉"] = s4
     fams["S5 通道突破"] = {f"N{n}": run_position(o, donchian_want(df, n), cost_frac) for n in (20, 55)}
+    # ---- 分組後的新規則 ----
+    tl, ts, tok, osd, obt, adx = indicator_groups(df)
+    n_ = len(df)
+    fams["S8 趨勢組同向持有"] = {}
+    for kk in TREND_K + [6]:
+        want = [(1 if tl[i] >= kk else -1 if ts[i] >= kk else 0) if tok[i] else 0 for i in range(n_)]
+        fams["S8 趨勢組同向持有"][f"{kk}/6同向"] = run_position(o, want, cost_frac)
+    s9, s10, s11 = {}, {}, {}
+    for kk in TREND_K:
+        for mm in OSC_M:
+            # 趨勢向上時等震盪組「超賣」才買（順勢拉回），趨勢向下時等「超買」才賣
+            sig = [(1 if tl[i] >= kk and osd[i] >= mm else -1 if ts[i] >= kk and obt[i] >= mm else 0)
+                   if tok[i] else 0 for i in range(n_)]
+            for sl in GRP_SL:
+                for tp_ in GRP_TP:
+                    s9[f"趨勢{kk}/6+震盪{mm}/5反向+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
+    for lv in ADX_LV:
+        for mm in OSC_M:
+            # ADX 低（盤整）：震盪組超賣買、超買賣
+            sig = [(1 if osd[i] >= mm else -1 if obt[i] >= mm else 0) if adx[i] < lv else 0 for i in range(n_)]
+            for sl in GRP_SL:
+                for tp_ in GRP_TP:
+                    s10[f"ADX<{lv}+震盪{mm}/5+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
+        for kk in TREND_K:
+            # ADX 高（有趨勢）：趨勢組剛轉成 kk 票同向時順勢進場
+            sig = [0] * n_
+            for i in range(1, n_):
+                if tok[i] and adx[i] >= lv:
+                    if tl[i] >= kk and tl[i - 1] < kk:
+                        sig[i] = 1
+                    elif ts[i] >= kk and ts[i - 1] < kk:
+                        sig[i] = -1
+            for sl in GRP_SL:
+                for tp_ in GRP_TP:
+                    s11[f"ADX≥{lv}+趨勢{kk}/6+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
+    fams["S9 趨勢方向+震盪拉回進場"] = s9
+    fams["S10 盤整(ADX低)震盪反轉"] = s10
+    fams["S11 趨勢(ADX高)順勢進場"] = s11
     if tf in LEVEL_TFS:
         brk, rev = level_events(df)
         vr = volume_ratio(df)
