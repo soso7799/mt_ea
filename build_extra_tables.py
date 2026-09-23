@@ -147,20 +147,25 @@ def build_session_table(mt5):
             else:
                 signal = "區間內"
         near[sym] = (nearest, dist, signal)
-        avg_vol = ""
+        # 成交量 = 最近一根已收盤 M5 的量；均量 = 它前面 20 根 M5 的平均；量比 = 成交量 / 均量
+        vol, avg_vol, vol_ratio = "", "", ""
         if mt5 is not None:
-            rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 1, 20)   # 最近 20 根已收盤 M5
-            if rates is not None and len(rates) > 0:
-                avg_vol = f"{sum(float(x['tick_volume']) for x in rates) / len(rates):.0f}"
+            rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 1, 21)
+            if rates is not None and len(rates) >= 2:
+                vols = [float(x["tick_volume"]) for x in rates]
+                v_last, v_avg = vols[-1], sum(vols[:-1]) / len(vols[:-1])
+                vol, avg_vol = f"{v_last:.0f}", f"{v_avg:.0f}"
+                if v_avg > 0:
+                    vol_ratio = f"{v_last / v_avg:.2f}"
         rows.append([sym, r.get("CurrentPrice", ""), o.get("TodayOpen", ""), chg,
                      r.get("Asian_High", ""), r.get("Asian_Low", ""),
                      r.get("European_High", ""), r.get("European_Low", ""),
                      r.get("US_High", ""), r.get("US_Low", ""),
                      r.get("Recent_Resistance", ""), r.get("Recent_Support", ""),
-                     avg_vol, signal, r.get("PrevDate", "")])
+                     vol, avg_vol, vol_ratio, signal, r.get("PrevDate", "")])
     write_csv("multi_symbol_session_levels.csv",
               ["商品", "CurrentPrice", "今日開盤價", "漲跌%", "亞盤高", "亞盤低", "歐盤高", "歐盤低",
-               "美盤高", "美盤低", "今高", "今低", "均量", "Signal", "PrevDate"], rows)
+               "美盤高", "美盤低", "今高", "今低", "成交量", "均量", "量比", "Signal", "PrevDate"], rows)
     return near
 
 
