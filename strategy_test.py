@@ -27,6 +27,12 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
   S12 抵銷後淨票數      ：多票減空票後的淨差夠大才判多空（原本儀表板等於淨差 >= 1）
                         原 11 票淨差 >= 3/5/7；分組算法（趨勢組順向＋震盪組反向）淨差 >= 2/3/4
                         兩種用法：淨差達標就持有 / 剛達標時進場＋停損停利 ATR
+  ── 使用者的 MT5 指標（照原始碼移植）──
+  S13 TAI 動能          ：TAI_Color_Panel_Optimized v2.60；藍＝多頭動能、紅＝空頭動能
+                        用法：有色就持有 / 「啟動」（第 1 根變色）進場 / 「延續」（連 2 根同色）進場＋停損停利
+                        參數：MA 14/28 × TAI 週期 5/10（其餘照指標預設）
+  S14 趨勢線突破        ：Trendline Signal FAST v2.10；已確認擺動點連線，陽線突破下降壓力線做多、陰線跌破上升支撐線做空
+                        擺動左右 3/5 根 × 過濾（不過濾 / TAI 同向 / TAI 不反向 / 分組淨票同向）× 停損停利
 
 輸出：
   update_output\\strategy_test.csv      每個 商品×週期×規則：最佳參數、前70%/後30% 成績、判定
@@ -52,13 +58,19 @@ LEVEL_TFS = ("H1", "M15")        # 關卡突破/反轉只測日內週期
 SESSIONS = {"亞": (3, 12), "歐": (10, 19), "美": (16, 24)}   # FTMO 伺服器時間，跟 make_levels.py 一樣
 VOL_K = [1.0, 1.5, 2.0]          # 成交量 >= 前 20 根平均的幾倍（1.0 = 不過濾）
 LVL_SL, LVL_TP = [1.0, 1.5], [1.5, 2.0, 3.0]
-VERSION = "4"                    # 規則有改就換版本，會強制重跑
+VERSION = "5"                    # 規則有改就換版本，會強制重跑
 TREND_K = [4, 5]                 # 趨勢組 6 個指標至少幾個同方向
 OSC_M = [2, 3]                   # 震盪組 5 個指標至少幾個同時超買/超賣
 ADX_LV = [20, 25]                # ADX 低於＝盤整、高於＝趨勢
 GRP_SL, GRP_TP = [1.5, 2.0], [2.0, 3.0]
 NET_TH_11 = [3, 5, 7]            # 原 11 票：多票-空票 淨差門檻（原本儀表板等於門檻 1）
 NET_TH_GRP = [2, 3, 4]           # 分組算法淨差門檻（趨勢組順向 + 震盪組反向，範圍 -11~+11）
+# TAI_Color_Panel_Optimized（v2.60）參數組合：(MA 週期, TAI 週期)；其餘照指標預設
+TAI_SETS = [(28, 5), (14, 5), (28, 10), (14, 10)]
+TAI_BOOST, TAI_FL, TAI_UP, TAI_DN, TAI_ATR, TAI_ATR_MULT = 0.35, 50, 80.0, 20.0, 14, 1.0
+# Trendline Signal FAST（v2.10）參數：擺動左右根數
+TL_LR = [3, 5]
+TL_DEPTH = 400                   # 往回找擺動點的最大根數（指標 MaxBarsToScan+SwingSearchDepth）
 SPLIT = 0.70
 MIN_TRADES_IS, MIN_TRADES_OOS = 30, 20
 RERUN_HOURS = 24
@@ -152,6 +164,94 @@ def indicator_groups(df):
     dx = 100 * (pdi - ndi).abs() / (pdi + ndi).replace(0, np.nan)
     adx = dx.ewm(alpha=1 / 14, adjust=False).mean().fillna(0).values
     return t_long, t_short, t_ok, oversold, overbought, adx
+
+
+def tai_color(df, ma_period=28, tai_period=5, boost=TAI_BOOST, fl_period=TAI_FL,
+              lv_up=TAI_UP, lv_dn=TAI_DN, atr_period=TAI_ATR, atr_mult=TAI_ATR_MULT):
+    """移植 TAI_Color_Panel_Optimized.mq5 v2.60（逐根、只用當根以前資料）
+       回傳 color[i]：1＝多頭動能（藍）、2＝空頭動能（紅）、0＝無（灰）"""
+    c, h, l = df["close"].values, df["high"].values, df["low"].values
+    n = len(c)
+    avg = pd.Series(c).ewm(span=ma_period, adjust=False).mean().values        # iMA EMA
+    tr = np.maximum(h - l, np.maximum(abs(h - np.r_[c[0], c[:-1]]), abs(l - np.r_[c[0], c[:-1]])))
+    atr_ = pd.Series(tr).rolling(atr_period).mean().fillna(0).values           # iATR（SMA）
+    fast = np.empty(n)
+    fast[0] = avg[0]
+    fast[1:] = avg[1:] + boost * (avg[1:] - avg[:-1])
+    val = np.zeros(n)
+    for i in range(tai_period, n):
+        w = fast[i - tai_period + 1:i + 1]
+        d = 1.0 if fast[i] >= fast[i - 1] else -1.0
+        val[i] = 100.0 * d * (w.max() - w.min()) / abs(c[i]) if abs(c[i]) > 1e-12 else 0.0
+    col = np.zeros(n, dtype=int)
+    vs = pd.Series(val)
+    vmin = vs.rolling(fl_period).min().values
+    vmax = vs.rolling(fl_period).max().values
+    for i in range(tai_period + fl_period, n):
+        rng = max(vmax[i] - vmin[i], 1e-12)
+        vol = min(0.20, (atr_[i] / abs(c[i]) if abs(c[i]) > 1e-12 else 0.0) * atr_mult * 10.0)
+        up = vmin[i] + rng * min(95.0, lv_up + vol * 25.0) * 0.01
+        dn = vmin[i] + rng * max(5.0, lv_dn - vol * 25.0) * 0.01
+        if val[i] > up and val[i] > val[i - 1]:
+            col[i] = 1
+        elif val[i] < dn and val[i] < val[i - 1]:
+            col[i] = 2
+    return col
+
+
+def tai_streak(col):
+    """面板邏輯：連續同色根數（>=2＝動能延續、1＝動能啟動），多為正、空為負"""
+    out, run = [0] * len(col), 0
+    for i, x in enumerate(col):
+        if x == 1:
+            run = run + 1 if run > 0 else 1
+        elif x == 2:
+            run = run - 1 if run < 0 else -1
+        else:
+            run = 0
+        out[i] = run
+    return out
+
+
+def trendline_signals(df, lr=3, depth=TL_DEPTH, need_dir_bar=True, need_slope=True):
+    """移植 Trendline Signal FAST V2.10：
+       用「訊號 K 收盤時已確認」的最近兩個擺動高點連成壓力線、兩個擺動低點連成支撐線；
+       壓力線向下（新高點較低）且陽線收盤由線下突破到線上 → +1；
+       支撐線向上（新低點較高）且陰線收盤由線上跌破到線下 → -1。"""
+    o, h, l, c = (df[k].values for k in ("open", "high", "low", "close"))
+    t = df["datetime"].values.astype("datetime64[s]").astype(np.int64).astype(float)
+    n = len(c)
+    sh, sl_ = [], []                       # 擺動點（依時間先後）
+    for j in range(lr, n - lr):
+        if all(h[j] > h[j + k] for k in range(1, lr + 1)) and all(h[j] >= h[j - k] for k in range(1, lr + 1)):
+            sh.append(j)
+        if all(l[j] < l[j + k] for k in range(1, lr + 1)) and all(l[j] <= l[j - k] for k in range(1, lr + 1)):
+            sl_.append(j)
+
+    def line(j_old, j_new, p_old, p_new, tt):
+        if t[j_new] == t[j_old]:
+            return p_new
+        return p_old + (p_new - p_old) * (tt - t[j_old]) / (t[j_new] - t[j_old])
+
+    sig = [0] * n
+    ih = il = 0
+    for s in range(1, n):
+        lim = s - lr                        # 擺動點 j 需 j <= s-lr 才算已確認
+        while ih < len(sh) and sh[ih] <= lim:
+            ih += 1
+        while il < len(sl_) and sl_[il] <= lim:
+            il += 1
+        if ih >= 2:
+            jn, jo = sh[ih - 1], sh[ih - 2]
+            if s - jo <= depth + lr and (not need_slope or h[jn] < h[jo]) and (not need_dir_bar or c[s] > o[s]):
+                if c[s - 1] <= line(jo, jn, h[jo], h[jn], t[s - 1]) and c[s] > line(jo, jn, h[jo], h[jn], t[s]):
+                    sig[s] = 1
+        if il >= 2 and sig[s] == 0:
+            jn, jo = sl_[il - 1], sl_[il - 2]
+            if s - jo <= depth + lr and (not need_slope or l[jn] > l[jo]) and (not need_dir_bar or c[s] < o[s]):
+                if c[s - 1] >= line(jo, jn, l[jo], l[jn], t[s - 1]) and c[s] < line(jo, jn, l[jo], l[jn], t[s]):
+                    sig[s] = -1
+    return sig
 
 
 def atr(df, n=14):
@@ -480,6 +580,34 @@ def test_series(sym, tf, df, spread):
             for tp_ in GRP_TP:
                 s12[f"分組淨差≥{th} 進場+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, ent, sl, tp_, cost_frac)
     fams["S12 抵銷後淨票數"] = s12
+    # ---- S13 TAI 動能（移植 TAI_Color_Panel）----
+    s13, tai_dir = {}, {}
+    for mp, tpd in TAI_SETS:
+        col = tai_color(df, mp, tpd)
+        stk = tai_streak(col)
+        tag = f"TAI(MA{mp},週期{tpd})"
+        tai_dir[(mp, tpd)] = [1 if x > 0 else -1 if x < 0 else 0 for x in stk]
+        s13[f"{tag} 有色就持有"] = run_position(o, tai_dir[(mp, tpd)], cost_frac)
+        for need, name in ((1, "啟動"), (2, "延續")):
+            ent = [1 if stk[i] == need else -1 if stk[i] == -need else 0 for i in range(n_)]
+            for sl in GRP_SL:
+                for tp_ in GRP_TP:
+                    s13[f"{tag} {name}進場+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, ent, sl, tp_, cost_frac)
+    fams["S13 TAI動能"] = s13
+    # ---- S14 趨勢線突破（移植 Trendline Signal FAST）＋ TAI / 分組淨票 過濾 ----
+    s14 = {}
+    tai_f = tai_dir[TAI_SETS[0]]
+    for lr in TL_LR:
+        tsig = trendline_signals(df, lr)
+        for fname, keep in (("不過濾", lambda i, e: True),
+                            ("TAI同向", lambda i, e: tai_f[i] == e),
+                            ("TAI不反向", lambda i, e: tai_f[i] != -e),
+                            ("分組淨票同向", lambda i, e: net_grp[i] * e >= 2)):
+            sig = [e if e != 0 and keep(i, e) else 0 for i, e in enumerate(tsig)]
+            for sl in GRP_SL:
+                for tp_ in GRP_TP:
+                    s14[f"擺動{lr}+{fname}+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
+    fams["S14 趨勢線突破"] = s14
     fams["S9 趨勢方向+震盪拉回進場"] = s9
     fams["S10 盤整(ADX低)震盪反轉"] = s10
     fams["S11 趨勢(ADX高)順勢進場"] = s11
