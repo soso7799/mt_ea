@@ -112,16 +112,21 @@ def fmt_t(t):
 
 # ------------------------------------------------------------------
 def build_session_table(mt5):
-    rows = []
+    """多商品時段壓力支撐；回傳 {商品: (最近關卡, 距離%, 訊號)} 給總整理用"""
+    opens = {r["Symbol"].strip(): r for r in read_csv("today_open.csv")}
+    rows, near = [], {}
     for r in read_csv("session_levels.csv"):
         sym = r["Symbol"].strip()
         price = num(r.get("CurrentPrice"))
+        o = opens.get(sym, {})
+        op = num(o.get("TodayOpen"))
+        chg = f"{(price - op) / op * 100:.3f}" if price and op else ""
         levels = {}
         for key, label in [("Asian_High", "亞盤高"), ("Asian_Low", "亞盤低"),
                            ("European_High", "歐盤高"), ("European_Low", "歐盤低"),
                            ("US_High", "美盤高"), ("US_Low", "美盤低"),
                            ("PrevDay_High", "前日高"), ("PrevDay_Low", "前日低"),
-                           ("Recent_Support", "近支撐"), ("Recent_Resistance", "近壓力")]:
+                           ("Recent_Support", "今低"), ("Recent_Resistance", "今高")]:
             v = num(r.get(key))
             if v is not None:
                 levels[label] = (v, r.get(key).strip())
@@ -141,24 +146,22 @@ def build_session_table(mt5):
                 signal = f"接近{label}"
             else:
                 signal = "區間內"
-        vr = ""
+        near[sym] = (nearest, dist, signal)
+        avg_vol = ""
         if mt5 is not None:
-            rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 0, 21)
-            if rates is not None and len(rates) >= 21:
-                vols = [float(x["tick_volume"]) for x in rates]
-                avg = sum(vols[:-1]) / 20
-                if avg > 0:
-                    vr = f"{vols[-1] / avg:.2f}"
-        rows.append([sym, r.get("PrevDate", ""),
+            rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M5, 1, 20)   # 最近 20 根已收盤 M5
+            if rates is not None and len(rates) > 0:
+                avg_vol = f"{sum(float(x['tick_volume']) for x in rates) / len(rates):.0f}"
+        rows.append([sym, r.get("CurrentPrice", ""), o.get("TodayOpen", ""), chg,
                      r.get("Asian_High", ""), r.get("Asian_Low", ""),
                      r.get("European_High", ""), r.get("European_Low", ""),
                      r.get("US_High", ""), r.get("US_Low", ""),
-                     r.get("PrevDay_High", ""), r.get("PrevDay_Low", ""),
-                     r.get("CurrentPrice", ""), nearest, dist, vr, signal])
+                     r.get("Recent_Resistance", ""), r.get("Recent_Support", ""),
+                     avg_vol, signal, r.get("PrevDate", "")])
     write_csv("multi_symbol_session_levels.csv",
-              ["Symbol", "PrevDate", "Asian_High", "Asian_Low", "European_High", "European_Low",
-               "US_High", "US_Low", "PrevDay_High", "PrevDay_Low", "CurrentPrice",
-               "NearestLevel", "DistanceToLevel", "VolumeRatio", "Signal"], rows)
+              ["商品", "CurrentPrice", "今日開盤價", "漲跌%", "亞盤高", "亞盤低", "歐盤高", "歐盤低",
+               "美盤高", "美盤低", "今高", "今低", "均量", "Signal", "PrevDate"], rows)
+    return near
 
 
 def build_entry_table():
@@ -332,15 +335,15 @@ def build_hedge_table(mt5, symbols):
 # ------------------------------------------------------------------
 # 總整理：每個商品一列
 # ------------------------------------------------------------------
-def build_summary_table(best, last_trade, member):
+def build_summary_table(best, last_trade, member, near):
     opens = {r["Symbol"].strip(): r for r in read_csv("today_open.csv")}
-    lv = {r["Symbol"].strip(): r for r in read_csv("multi_symbol_session_levels.csv")}
     ent = {r["Symbol"].strip(): r for r in read_csv("multi_symbol_entry_signals.csv")}
     st = {(r["Symbol"].strip(), r["Period"].strip()): r for r in read_csv("multi_symbol_status.csv")}
     syms = list(opens) + sorted(s for s in ent if s not in opens)
     rows = []
     for sym in syms:
-        o, l, e = opens.get(sym, {}), lv.get(sym, {}), ent.get(sym, {})
+        o, e = opens.get(sym, {}), ent.get(sym, {})
+        nl = near.get(sym, ("", "", ""))
         price, op = num(o.get("LatestClose")), num(o.get("TodayOpen"))
         chg = f"{(price - op) / op * 100:.3f}" if price and op else ""
         b = best.get(sym)
@@ -350,7 +353,7 @@ def build_summary_table(best, last_trade, member):
                      e.get("TrendDirection", ""),
                      e.get("D1_Status", ""), e.get("H4_Status", ""), e.get("H1_Status", ""),
                      e.get("M15_Status", ""), e.get("M5_Status", ""), e.get("EntrySignal", ""),
-                     l.get("NearestLevel", ""), l.get("DistanceToLevel", ""), l.get("Signal", ""),
+                     nl[0], nl[1], nl[2],
                      b[0] if b else "", f"{b[1]:.1f}" if b else "", f"{b[2]:.3f}" if b else "",
                      t[0] if t else "", t[1] if t else "", t[2] if t else "",
                      f"{t[3]:.3f}" if t else "", fmt_t(t[4]) if t else "",
@@ -372,11 +375,11 @@ def main():
     except ImportError:
         mt5 = None
 
-    for name, fn in [("時段壓力支撐", lambda: build_session_table(mt5))]:
-        try:
-            fn()
-        except Exception as e:
-            print(f"[額外報表] {name} 失敗：{e}")
+    near = {}
+    try:
+        near = build_session_table(mt5)
+    except Exception as e:
+        print(f"[額外報表] 時段壓力支撐 失敗：{e}")
     symbols = []
     try:
         symbols = build_entry_table()
@@ -396,7 +399,7 @@ def main():
     else:
         print("[額外報表] MT5 未開啟，回測摘要/交易明細/避險分組這次不更新")
     try:
-        build_summary_table(best, last_trade, member)
+        build_summary_table(best, last_trade, member, near)
     except Exception as e:
         print(f"[額外報表] 總整理 失敗：{e}")
 
