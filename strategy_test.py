@@ -21,7 +21,7 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
   S7 關卡反轉+量+多空：同上關卡，盤中刺破但收盤收回（假突破）就反向進場；過濾與出場同 S6
   ── 11 指標分組（趨勢組：MA/MACD/MTM/布林/BIAS/Keltner；震盪組：RSI/KD/威廉/CCI/PSY，震盪組要反著用）──
   S8  趨勢組同向持有    ：趨勢組 6 個至少 4/5/6 個同向就持有，不夠就空手
-  S9  趨勢方向+震盪拉回 ：趨勢組 4/5 個向上時，等震盪組 2/3 個「超賣」才買（空方相反）；停損停利 ATR
+  S9  趨勢方向+震盪拉回 ：價在 EMA100/200 之上時，等震盪組 2/3 個「超賣」才買（空方相反）；停損停利 ATR
   S10 盤整震盪反轉      ：ADX < 20/25（盤整）時，震盪組 2/3 個超賣買、超買賣；停損停利 ATR
   S11 趨勢順勢進場      ：ADX >= 20/25（有趨勢）時，趨勢組剛轉成 4/5 個同向就順勢進場；停損停利 ATR
   S12 抵銷後淨票數      ：多票減空票後的淨差夠大才判多空（原本儀表板等於淨差 >= 1）
@@ -52,7 +52,7 @@ LEVEL_TFS = ("H1", "M15")        # 關卡突破/反轉只測日內週期
 SESSIONS = {"亞": (3, 12), "歐": (10, 19), "美": (16, 24)}   # FTMO 伺服器時間，跟 make_levels.py 一樣
 VOL_K = [1.0, 1.5, 2.0]          # 成交量 >= 前 20 根平均的幾倍（1.0 = 不過濾）
 LVL_SL, LVL_TP = [1.0, 1.5], [1.5, 2.0, 3.0]
-VERSION = "3"                    # 規則有改就換版本，會強制重跑
+VERSION = "4"                    # 規則有改就換版本，會強制重跑
 TREND_K = [4, 5]                 # 趨勢組 6 個指標至少幾個同方向
 OSC_M = [2, 3]                   # 震盪組 5 個指標至少幾個同時超買/超賣
 ADX_LV = [20, 25]                # ADX 低於＝盤整、高於＝趨勢
@@ -373,8 +373,13 @@ def load_spreads():
 
 
 def load(path, tf):
-    df = pd.read_csv(path, encoding="utf-8-sig")
+    df = pd.read_csv(path, encoding="utf-8-sig", thousands=",", dtype=str)
     df.columns = [c.strip().lower() for c in df.columns]
+    for col in ("open", "high", "low", "close", "volume"):      # 成交量可能有千分位逗號 "2,694"
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].str.replace(",", "", regex=False), errors="coerce")
+    if "volume" in df.columns:
+        df["volume"] = df["volume"].fillna(0)
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
     df = df.dropna(subset=["datetime", "open", "high", "low", "close"]).sort_values("datetime")
     df = df.drop_duplicates("datetime").tail(MAX_BARS[tf]).reset_index(drop=True)
@@ -426,14 +431,15 @@ def test_series(sym, tf, df, spread):
         want = [(1 if tl[i] >= kk else -1 if ts[i] >= kk else 0) if tok[i] else 0 for i in range(n_)]
         fams["S8 趨勢組同向持有"][f"{kk}/6同向"] = run_position(o, want, cost_frac)
     s9, s10, s11 = {}, {}, {}
-    for kk in TREND_K:
+    for en in (100, 200):
         for mm in OSC_M:
-            # 趨勢向上時等震盪組「超賣」才買（順勢拉回），趨勢向下時等「超買」才賣
-            sig = [(1 if tl[i] >= kk and osd[i] >= mm else -1 if ts[i] >= kk and obt[i] >= mm else 0)
-                   if tok[i] else 0 for i in range(n_)]
+            # 大趨勢用慢速 EMA 判斷（快速趨勢指標在回檔時會跟著翻，不能用）：
+            # 價在 EMA 上 → 等震盪組「超賣」才買（順勢買回檔）；價在 EMA 下 → 等「超買」才賣
+            sig = [(1 if trend[en][i] == 1 and osd[i] >= mm else -1 if trend[en][i] == -1 and obt[i] >= mm else 0)
+                   for i in range(n_)]
             for sl in GRP_SL:
                 for tp_ in GRP_TP:
-                    s9[f"趨勢{kk}/6+震盪{mm}/5反向+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
+                    s9[f"EMA{en}方向+震盪{mm}/5反向+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
     for lv in ADX_LV:
         for mm in OSC_M:
             # ADX 低（盤整）：震盪組超賣買、超買賣
