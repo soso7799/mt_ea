@@ -417,6 +417,12 @@ def main():
         build_summary_table(best, last_trade, member, near)
     except Exception as e:
         print(f"[額外報表] 總整理 失敗：{e}")
+    # 規則比較測試（結果檔 6 小時內跑過就略過）
+    try:
+        import strategy_test
+        strategy_test.main()
+    except Exception as e:
+        print(f"[規則測試] 失敗：{e}")
 
 if __name__ == "__main__":
     main()
