@@ -347,6 +347,16 @@ def build_hedge_table(mt5, symbols):
     return member
 
 
+def write_spreads(mt5, symbols):
+    """給 strategy_test.py 用：每個商品目前的點差（價格單位）"""
+    rows = []
+    for sym in symbols:
+        info = mt5.symbol_info(sym) if mt5.symbol_select(sym, True) else None
+        if info:
+            rows.append([sym, f"{info.spread * info.point:.10g}"])
+    write_csv("spreads.csv", ["Symbol", "Spread"], rows)
+
+
 # ------------------------------------------------------------------
 # 總整理：每個商品一列
 # ------------------------------------------------------------------
@@ -407,6 +417,10 @@ def main():
         except Exception as e:
             print(f"[額外報表] 回測 失敗：{e}")
         try:
+            write_spreads(mt5, symbols)
+        except Exception as e:
+            print(f"[額外報表] 點差 失敗：{e}")
+        try:
             member = build_hedge_table(mt5, symbols)
         except Exception as e:
             print(f"[額外報表] 避險分組 失敗：{e}")
@@ -417,12 +431,12 @@ def main():
         build_summary_table(best, last_trade, member, near)
     except Exception as e:
         print(f"[額外報表] 總整理 失敗：{e}")
-    # 規則比較測試（結果檔 6 小時內跑過就略過）
+    # 規則比較測試：用 merged 歷史資料在背景跑（不卡 Excel；24 小時內跑過就略過）
     try:
         import strategy_test
-        strategy_test.main()
+        print(f"[規則測試] {strategy_test.launch_background()}")
     except Exception as e:
-        print(f"[規則測試] 失敗：{e}")
+        print(f"[規則測試] 啟動失敗：{e}")
 
 if __name__ == "__main__":
     main()

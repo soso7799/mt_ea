@@ -1,110 +1,159 @@
 # -*- coding: utf-8 -*-
 """
-strategy_test.py —— 用 MT5 真實歷史 K 棒，比較幾種進出場規則是否有正期望值（含點差成本）
+strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種進出場規則 × 多組參數（含點差成本）
 
-輸出：update_output\\strategy_test.csv（每個 商品 × 週期 × 規則 一列）
-由 build_extra_tables.py 自動呼叫；結果檔 6 小時內跑過就不重跑（避免每按一次按鈕都變慢）。
+資料：ExportCSV\\merged\\{商品}_{週期}_MERGED_ALL_DATA.csv（datetime,open,high,low,close,volume）
+點差：build_extra_tables.py 從 MT5 寫出的 update_output\\spreads.csv；沒有就用價格的 0.01%
 
-規則（全部是「K 棒收盤出訊號、下一根開盤進場」，不偷看未來）：
-  S0 投票翻邊     ：目前儀表板用的 11 指標多數決，翻邊就反手（對照組）
-  S1 順勢投票     ：投票方向和 EMA200 方向一致才持有，不一致就空手
-  S2 投票+ATR停損 ：投票翻邊進場，停損 1.5×ATR、停利 3×ATR（同一根同時碰到算停損）
-  S3 前日高低突破 ：H1 收盤突破前一日高點做多、跌破前一日低點做空；停損 1.5×ATR、停利 3×ATR，
-                    當天沒出場就在換日時平倉（只測 H1）
-每筆交易扣一次點差（用 MT5 目前的 spread）。
+防止「參數挑到剛好好看」：每個商品×週期把歷史切成前 70%（挑參數）和後 30%（驗證）。
+每種規則只在前 70% 挑出最好的那組參數，再看它在「沒看過」的後 30% 表現。
+判定「有效」：前70%、後30% 都賺，後30% 獲利因子 >= 1.2，且後30% 平均報酬 t 值 >= 2（排除運氣）。
+
+規則（全部是 K 棒收盤出訊號、下一根開盤進場，不偷看未來）：
+  S0 投票翻邊        ：目前儀表板的 11 指標多數決，翻邊就反手（對照組，無參數）
+  S1 順勢投票        ：投票方向與 EMA(n) 方向一致才持有；n = 50 / 100 / 200
+  S2 投票+停損停利   ：投票翻邊進場；停損 1/1.5/2 ATR × 停利 1.5/2/3 ATR；可加 EMA200 順勢過濾
+  S3 前日高低突破    ：收盤突破前一日高做多 / 跌破前一日低做空（只測 H1）；停損停利同 S2，換日平倉
+  S4 均線交叉        ：EMA 快慢線交叉就反手；(10,30) / (20,50) / (50,200)
+  S5 通道突破        ：收盤突破前 N 根最高做多、跌破前 N 根最低做空，反向 N/2 通道出場；N = 20 / 55
+
+輸出：
+  update_output\\strategy_test.csv      每個 商品×週期×規則：最佳參數、前70%/後30% 成績、判定
+  update_output\\strategy_test_all.csv  每一組參數的全期成績（給想細看的人）
+
+用法：由 build_extra_tables.py 在背景自動啟動（不會卡住 Excel）；24 小時內跑過就不重跑。
+手動重跑：python strategy_test.py
 """
 import csv
+import glob
 import os
+import sys
 import time
 
 import numpy as np
 import pandas as pd
 
-from build_extra_tables import OUT_DIR, vote_series
-
-RESULT = "strategy_test.csv"
-TEST_BARS = 3000
+OUT_DIR = r"G:\我的雲端硬碟\整理後\update_output"
+MERGED_DIRS = [r"G:\我的雲端硬碟\整理後\ExportCSV\merged", r"G:\我的雲端硬碟\ExportCSV\merged"]
 TFS = ["D1", "H4", "H1"]
-SL_ATR, TP_ATR = 1.5, 3.0
-MIN_TRADES = 30          # 交易數少於這個 → 樣本不足
-RERUN_HOURS = 6
+MAX_BARS = {"D1": 6000, "H4": 20000, "H1": 30000}   # 每個週期最多用最近幾根（控制執行時間）
+SPLIT = 0.70
+MIN_TRADES_IS, MIN_TRADES_OOS = 30, 20
+RERUN_HOURS = 24
+SL_LIST, TP_LIST = [1.0, 1.5, 2.0], [1.5, 2.0, 3.0]
+T_MIN = 2.0              # 後30% 平均報酬 t 值門檻
+
+
+# ------------------------------------------------------------------ 指標
+def ema(s, n):
+    return s.ewm(span=n, adjust=False).mean()
+
+
+def vote_series(df):
+    """跟 build_extra_tables.py / 儀表板一樣的 11 指標投票：+1 多 / -1 空 / 0 無"""
+    c, h, l = df["close"], df["high"], df["low"]
+    sig = {}
+    sig["MA"] = np.sign(c.rolling(8).mean() - c.rolling(50).mean())
+    d = c.diff()
+    ag = d.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    al = (-d.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    rsi = 100 - 100 / (1 + ag / al.replace(0, np.nan))
+    sig["RSI"] = np.sign(rsi - 50)
+    ll, hh = l.rolling(9).min(), h.rolling(9).max()
+    k = ((c - ll) / (hh - ll).replace(0, np.nan) * 100).ewm(alpha=1 / 3, adjust=False).mean()
+    sig["KD"] = np.sign(k - k.ewm(alpha=1 / 3, adjust=False).mean())
+    sig["PSY"] = np.sign((d > 0).astype(float).rolling(12).sum() / 12 * 100 - 50)
+    hw, lw = h.rolling(14).max(), l.rolling(14).min()
+    sig["WR"] = np.sign((hw - c) / (hw - lw).replace(0, np.nan) * -100 + 50)
+    sig["MTM"] = np.sign(c.diff(10))
+    macd = ema(c, 12) - ema(c, 26)
+    sig["MACD"] = np.sign(macd - ema(macd, 9))
+    sig["BOLL"] = np.sign(c - c.rolling(20).mean())
+    tp = (h + l + c) / 3
+    md = tp.rolling(14).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
+    sig["CCI"] = np.sign((tp - tp.rolling(14).mean()) / (0.015 * md.replace(0, np.nan)))
+    sig["BIAS"] = np.sign(c - c.rolling(20).mean())
+    sig["KELTNER"] = np.sign(c - ema(c, 20))
+    m = pd.DataFrame(sig)
+    longs, shorts = (m > 0).sum(axis=1), (m < 0).sum(axis=1)
+    pos = np.where(longs > shorts, 1, np.where(shorts > longs, -1, 0))
+    pos[m.isna().any(axis=1).values] = 0
+    return pos
 
 
 def atr(df, n=14):
     h, l, c = df["high"], df["low"], df["close"]
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    return tr.ewm(alpha=1 / n, adjust=False).mean()
+    return tr.ewm(alpha=1 / n, adjust=False).mean().values
 
 
-def run_position(df, want, cost):
-    """want[i]＝第 i 根收盤後想要的部位（+1/-1/0），在第 i+1 根開盤執行。回傳每筆報酬%（已扣成本）"""
-    o = df["open"].values
-    rets, cur, entry = [], 0, 0.0
-    for i in range(len(df) - 1):
-        w = int(want[i])
+# ------------------------------------------------------------------ 交易引擎（回傳 [(出場索引, 報酬%)]）
+def run_position(o, want, cost_frac):
+    """want[i]：第 i 根收盤後想要的部位，第 i+1 根開盤執行"""
+    out, cur, entry = [], 0, 0.0
+    for i in range(len(o) - 1):
+        w = want[i]
         if w == cur:
             continue
         px = o[i + 1]
         if cur != 0:
-            rets.append(cur * (px - entry) / entry * 100 - cost / entry * 100)
+            out.append((i + 1, cur * (px - entry) / entry * 100 - cost_frac * 100))
         cur, entry = w, px
-    return rets
+    return out
 
 
-def run_sl_tp(df, entry_sig, cost, day_exit=False):
-    """entry_sig[i]＝第 i 根收盤出現的進場訊號（+1/-1/0），下一根開盤進場；持倉中忽略新訊號。
-    停損/停利用之後每根的高低價判斷，同一根同時碰到算停損（保守）。"""
-    o, h, l, c = (df[k].values for k in ("open", "high", "low", "close"))
-    a = atr(df).values
-    days = df["datetime"].dt.date.values
-    rets, i, n = [], 0, len(df)
+def run_sl_tp(o, h, l, c, a, days, sig, sl_k, tp_k, cost_frac, day_exit=False):
+    out, i, n = [], 0, len(o)
     while i < n - 1:
-        s = int(entry_sig[i])
-        if s == 0 or np.isnan(a[i]):
+        s = sig[i]
+        if s == 0 or a[i] != a[i]:
             i += 1
             continue
         e = o[i + 1]
-        sl = e - s * SL_ATR * a[i]
-        tp = e + s * TP_ATR * a[i]
-        j, exit_px = i + 1, None
+        sl, tp = e - s * sl_k * a[i], e + s * tp_k * a[i]
+        j, px = i + 1, None
         while j < n:
             if s > 0:
                 if l[j] <= sl:
-                    exit_px = sl
+                    px = sl
                 elif h[j] >= tp:
-                    exit_px = tp
+                    px = tp
             else:
                 if h[j] >= sl:
-                    exit_px = sl
+                    px = sl
                 elif l[j] <= tp:
-                    exit_px = tp
-            if exit_px is None and day_exit and j + 1 < n and days[j + 1] != days[j]:
-                exit_px = c[j]
-            if exit_px is not None:
+                    px = tp
+            if px is None and day_exit and j + 1 < n and days[j + 1] != days[j]:
+                px = c[j]
+            if px is not None:
                 break
             j += 1
-        if exit_px is None:
-            exit_px = c[n - 1]
-        rets.append(s * (exit_px - e) / e * 100 - cost / e * 100)
+        if px is None:
+            j, px = n - 1, c[n - 1]
+        out.append((j, s * (px - e) / e * 100 - cost_frac * 100))
         i = j + 1
-    return rets
+    return out
+
+
+# ------------------------------------------------------------------ 訊號
+def flips(vote):
+    f = [0] * len(vote)
+    for i in range(1, len(vote)):
+        if vote[i] != vote[i - 1] and vote[i] != 0:
+            f[i] = int(vote[i])
+    return f
 
 
 def breakout_signals(df):
-    """H1：收盤第一次突破前一日高（+1）/ 跌破前一日低（-1），每天每個方向只算一次"""
     d = df["datetime"].dt.date
-    daily = df.groupby(d).agg(hi=("high", "max"), lo=("low", "min"))
-    prev = daily.shift(1)
-    phi = d.map(prev["hi"]).values
-    plo = d.map(prev["lo"]).values
-    c = df["close"].values
-    sig = np.zeros(len(df))
-    fired = {}
+    daily = df.groupby(d).agg(hi=("high", "max"), lo=("low", "min")).shift(1)
+    phi, plo = d.map(daily["hi"]).values, d.map(daily["lo"]).values
+    c, dv = df["close"].values, d.values
+    sig, fired = [0] * len(df), {}
     for i in range(len(df)):
-        if np.isnan(phi[i]):
+        if phi[i] != phi[i]:
             continue
-        k = d.iloc[i]
-        f = fired.setdefault(k, set())
+        f = fired.setdefault(dv[i], set())
         if c[i] > phi[i] and 1 not in f:
             sig[i] = 1
             f.add(1)
@@ -114,95 +163,220 @@ def breakout_signals(df):
     return sig
 
 
+def donchian_want(df, n):
+    hi_n = df["high"].rolling(n).max().shift(1).values
+    lo_n = df["low"].rolling(n).min().shift(1).values
+    hi_x = df["high"].rolling(n // 2).max().shift(1).values
+    lo_x = df["low"].rolling(n // 2).min().shift(1).values
+    c = df["close"].values
+    want, cur = [0] * len(df), 0
+    for i in range(len(df)):
+        if hi_n[i] != hi_n[i]:
+            continue
+        if cur == 1 and c[i] < lo_x[i]:
+            cur = 0
+        elif cur == -1 and c[i] > hi_x[i]:
+            cur = 0
+        if c[i] > hi_n[i]:
+            cur = 1
+        elif c[i] < lo_n[i]:
+            cur = -1
+        want[i] = cur
+    return want
+
+
+# ------------------------------------------------------------------ 統計
 def stats(rets):
     n = len(rets)
     if n == 0:
-        return dict(n=0)
+        return dict(n=0, win=0.0, avg=0.0, total=0.0, pf=0.0, streak=0, t=0.0)
     r = np.array(rets)
-    win, loss = r[r > 0].sum(), -r[r < 0].sum()
+    w, lo = r[r > 0].sum(), -r[r < 0].sum()
     streak = best = 0
     for x in r:
         streak = streak + 1 if x <= 0 else 0
         best = max(best, streak)
-    half = n // 2
-    def pf(x):
-        w, l = x[x > 0].sum(), -x[x < 0].sum()
-        return w / l if l > 0 else (np.inf if w > 0 else 0)
-    return dict(n=n, win=(r > 0).mean() * 100, avg=r.mean(), total=r.sum(),
-                pf=win / loss if loss > 0 else np.inf, streak=best,
-                pf1=pf(r[:half]), pf2=pf(r[half:]))
+    pf = w / lo if lo > 0 else (99.0 if w > 0 else 0.0)
+    sd = r.std(ddof=1) if n > 1 else 0.0
+    t = r.mean() / (sd / np.sqrt(n)) if sd > 0 else 0.0     # 平均報酬的 t 值（>=2 才算不是運氣）
+    return dict(n=n, win=(r > 0).mean() * 100, avg=r.mean(), total=r.sum(), pf=pf, streak=best, t=t)
 
 
-def verdict(s):
-    if s["n"] < MIN_TRADES:
+def split_stats(trades, cut):
+    is_r = [r for j, r in trades if j < cut]
+    oos_r = [r for j, r in trades if j >= cut]
+    return stats([r for _, r in trades]), stats(is_r), stats(oos_r)
+
+
+def verdict(is_s, oos):
+    """有效＝前70%和後30%都賺，且後30%的 t 值 >= 2（隨機資料很難做到）"""
+    if is_s["n"] < MIN_TRADES_IS or oos["n"] < MIN_TRADES_OOS:
         return "樣本不足"
-    if s["avg"] > 0 and s["pf"] >= 1.2 and s["pf1"] > 1 and s["pf2"] > 1:
-        return "有效（前後半段都賺）"
-    if s["avg"] > 0 and s["pf"] > 1:
-        return "微幅正值（不穩定）"
+    if is_s["avg"] > 0 and oos["avg"] > 0 and oos["pf"] >= 1.2 and oos["t"] >= T_MIN:
+        return "有效"
+    if is_s["avg"] > 0 and oos["avg"] > 0 and oos["pf"] > 1:
+        return "可能有效（統計上不夠強）"
     return "無效"
 
 
-def main(force=False):
-    path = os.path.join(OUT_DIR, RESULT)
-    if not force and os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
-        print(f"[規則測試] {RESULT} {RERUN_HOURS} 小時內跑過，這次略過")
-        return
-    import MetaTrader5 as mt5
-    if not mt5.initialize():
-        print("[規則測試] MT5 未開啟，略過")
-        return
-    syms = []
-    status = os.path.join(OUT_DIR, "multi_symbol_status.csv")
-    if os.path.exists(status):
-        with open(status, encoding="utf-8-sig", newline="") as f:
+# ------------------------------------------------------------------ 主程式
+def find_merged_dir():
+    for d in MERGED_DIRS:
+        if os.path.isdir(d) and glob.glob(os.path.join(d, "*_MERGED_ALL_DATA.csv")):
+            return d
+    return None
+
+
+def load_spreads():
+    path = os.path.join(OUT_DIR, "spreads.csv")
+    sp = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8-sig", newline="") as f:
             for r in csv.DictReader(f):
-                s = (r.get("Symbol") or "").strip()
-                if s and s not in syms:
-                    syms.append(s)
-    rows = []
-    for sym in syms:
-        if not mt5.symbol_select(sym, True):
+                try:
+                    sp[r["Symbol"].strip()] = float(r["Spread"])
+                except (KeyError, ValueError):
+                    pass
+    return sp
+
+
+def load(path, tf):
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    df.columns = [c.strip().lower() for c in df.columns]
+    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+    df = df.dropna(subset=["datetime", "open", "high", "low", "close"]).sort_values("datetime")
+    df = df.drop_duplicates("datetime").tail(MAX_BARS[tf]).reset_index(drop=True)
+    return df
+
+
+def test_series(sym, tf, df, spread):
+    o, h, l, c = (df[k].tolist() for k in ("open", "high", "low", "close"))
+    a = atr(df).tolist()
+    days = df["datetime"].dt.date.tolist()
+    price = float(np.median(df["close"].values))
+    cost_frac = (spread / price) if spread else 0.0001
+    cut = int(len(df) * SPLIT)
+    vote = [int(x) for x in vote_series(df)]
+    fl = flips(vote)
+    close = df["close"]
+    trend = {n: [1 if x > m else -1 for x, m in zip(close, ema(close, n))] for n in (50, 100, 200)}
+    for n in trend:
+        trend[n][:n] = [0] * min(n, len(df))
+
+    fams = {}
+    fams["S0 投票翻邊"] = {"—": run_position(o, vote, cost_frac)}
+    fams["S1 順勢投票"] = {f"EMA{n}": run_position(o, [v if v == t else 0 for v, t in zip(vote, trend[n])], cost_frac)
+                           for n in (50, 100, 200)}
+    s2 = {}
+    for filt in (False, True):
+        sig = [f if (not filt or f == trend[200][i]) else 0 for i, f in enumerate(fl)]
+        for sl in SL_LIST:
+            for tp in TP_LIST:
+                key = f"SL{sl}/TP{tp}" + ("+EMA200" if filt else "")
+                s2[key] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp, cost_frac)
+    fams["S2 投票+停損停利"] = s2
+    if tf == "H1":
+        bsig = breakout_signals(df)
+        fams["S3 前日高低突破"] = {f"SL{sl}/TP{tp}": run_sl_tp(o, h, l, c, a, days, bsig, sl, tp, cost_frac, True)
+                                  for sl in SL_LIST for tp in TP_LIST}
+    s4 = {}
+    for f_, s_ in ((10, 30), (20, 50), (50, 200)):
+        want = [1 if x > y else -1 for x, y in zip(ema(close, f_), ema(close, s_))]
+        want[:s_] = [0] * min(s_, len(df))
+        s4[f"EMA{f_}/{s_}"] = run_position(o, want, cost_frac)
+    fams["S4 均線交叉"] = s4
+    fams["S5 通道突破"] = {f"N{n}": run_position(o, donchian_want(df, n), cost_frac) for n in (20, 55)}
+
+    span_is = f"{df['datetime'].iloc[0]:%Y-%m-%d}~{df['datetime'].iloc[cut - 1]:%Y-%m-%d}"
+    span_oos = f"{df['datetime'].iloc[cut]:%Y-%m-%d}~{df['datetime'].iloc[-1]:%Y-%m-%d}"
+    best_rows, all_rows = [], []
+    for fam, combos in fams.items():
+        scored = []
+        for key, trades in combos.items():
+            full, is_s, oos = split_stats(trades, cut)
+            all_rows.append([sym, tf, fam, key, full["n"], f"{full['win']:.1f}", f"{full['avg']:.3f}",
+                             f"{full['total']:.2f}", f"{full['pf']:.2f}", full["streak"]])
+            scored.append((key, is_s, oos))
+        ok = [x for x in scored if x[1]["n"] >= MIN_TRADES_IS]
+        pool = ok or scored
+        key, is_s, oos = max(pool, key=lambda x: (x[1]["pf"], x[1]["avg"]))
+        best_rows.append([sym, tf, fam, key,
+                          is_s["n"], f"{is_s['win']:.1f}", f"{is_s['avg']:.3f}", f"{is_s['pf']:.2f}",
+                          oos["n"], f"{oos['win']:.1f}", f"{oos['avg']:.3f}", f"{oos['total']:.2f}",
+                          f"{oos['pf']:.2f}", f"{oos['t']:.2f}", oos["streak"],
+                          verdict(is_s, oos), span_is, span_oos])
+    return best_rows, all_rows
+
+
+def main(force=False):
+    path = os.path.join(OUT_DIR, "strategy_test.csv")
+    if not force and os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
+        print(f"[規則測試] {RERUN_HOURS} 小時內跑過，這次略過")
+        return
+    mdir = find_merged_dir()
+    if not mdir:
+        print(f"[規則測試] 找不到 merged 資料夾：{MERGED_DIRS}")
+        return
+    spreads = load_spreads()
+    t0 = time.time()
+    best, allr = [], []
+    files = sorted(glob.glob(os.path.join(mdir, "*_MERGED_ALL_DATA.csv")))
+    for fpath in files:
+        base = os.path.basename(fpath)[:-len("_MERGED_ALL_DATA.csv")]
+        sym, _, tf = base.rpartition("_")
+        if tf not in TFS:
             continue
-        info = mt5.symbol_info(sym)
-        cost = (info.spread * info.point) if info else 0.0
-        for tf in TFS:
-            rates = mt5.copy_rates_from_pos(sym, getattr(mt5, "TIMEFRAME_" + tf), 0, TEST_BARS)
-            if rates is None or len(rates) < 300:
+        try:
+            df = load(fpath, tf)
+            if len(df) < 500:
                 continue
-            df = pd.DataFrame(rates)
-            df["datetime"] = pd.to_datetime(df["time"], unit="s")
-            vote = vote_series(df).values
-            ema200 = df["close"].ewm(span=200, adjust=False).mean().values
-            trend = np.where(df["close"].values > ema200, 1, -1)
-            trend[:200] = 0
-            flip = np.zeros(len(df))
-            flip[1:] = np.where((vote[1:] != vote[:-1]) & (vote[1:] != 0), vote[1:], 0)
-            tests = {
-                "S0 投票翻邊": run_position(df, vote, cost),
-                "S1 順勢投票": run_position(df, np.where(vote == trend, vote, 0), cost),
-                "S2 投票+ATR停損": run_sl_tp(df, flip, cost),
-            }
-            if tf == "H1":
-                tests["S3 前日高低突破"] = run_sl_tp(df, breakout_signals(df), cost, day_exit=True)
-            span = f"{df['datetime'].iloc[0]:%Y-%m-%d} ~ {df['datetime'].iloc[-1]:%Y-%m-%d}"
-            for name, rets in tests.items():
-                s = stats(rets)
-                if s["n"] == 0:
-                    rows.append([sym, tf, name, 0, "", "", "", "", "", "", "樣本不足", span])
-                    continue
-                rows.append([sym, tf, name, s["n"], f"{s['win']:.1f}", f"{s['avg']:.3f}", f"{s['total']:.2f}",
-                             f"{s['pf']:.2f}" if np.isfinite(s["pf"]) else "∞", s["streak"],
-                             f"{s['pf1']:.2f} / {s['pf2']:.2f}" if np.isfinite(s["pf1"]) and np.isfinite(s["pf2"]) else "",
-                             verdict(s), span])
-    mt5.shutdown()
+            b, a = test_series(sym, tf, df, spreads.get(sym))
+            best += b
+            allr += a
+            print(f"[規則測試] {sym} {tf}：{len(df)} 根 OK")
+        except Exception as e:
+            print(f"[規則測試] {sym} {tf} 失敗：{e}")
+    with open(os.path.join(OUT_DIR, "strategy_test_all.csv"), "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Symbol", "週期", "規則", "參數", "交易數", "勝率%", "平均報酬%", "總報酬%", "獲利因子", "最大連虧"])
+        w.writerows(allr)
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Symbol", "週期", "規則", "交易數", "勝率%", "平均報酬%(扣點差)", "總報酬%",
-                    "獲利因子", "最大連虧", "前半/後半獲利因子", "判定", "測試期間"])
-        w.writerows(rows)
-    print(f"[規則測試] {RESULT}：{len(rows)} 列")
+        w.writerow(["Symbol", "週期", "規則", "最佳參數(前70%挑)",
+                    "前70%交易數", "前70%勝率%", "前70%平均報酬%", "前70%獲利因子",
+                    "後30%交易數", "後30%勝率%", "後30%平均報酬%", "後30%總報酬%", "後30%獲利因子",
+                    "後30%t值", "後30%最大連虧", "判定", "前70%期間", "後30%期間"])
+        w.writerows(best)
+    print(f"[規則測試] 完成：{len(best)} 列，耗時 {time.time() - t0:.0f} 秒")
+
+
+def launch_background():
+    """給 build_extra_tables.py 呼叫：另開背景程序跑，不卡住 Excel 按鈕"""
+    path = os.path.join(OUT_DIR, "strategy_test.csv")
+    if os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
+        return "24 小時內跑過，略過"
+    lock = os.path.join(OUT_DIR, "strategy_test.running")
+    if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3 * 3600:
+        return "上一次還在背景執行中"
+    import subprocess
+    log = open(os.path.join(OUT_DIR, "log_strategy_test.txt"), "w", encoding="utf-8")
+    flags = 0x00000008 | 0x08000000 if os.name == "nt" else 0   # DETACHED_PROCESS | CREATE_NO_WINDOW
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "--bg"], stdout=log, stderr=log,
+                     cwd=os.path.dirname(os.path.abspath(__file__)), creationflags=flags,
+                     env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    return "已在背景啟動（約數分鐘，完成後寫出 strategy_test.csv）"
 
 
 if __name__ == "__main__":
-    main(force=True)
+    if "--bg" in sys.argv:
+        lock = os.path.join(OUT_DIR, "strategy_test.running")
+        open(lock, "w").close()
+        try:
+            main(force=True)
+        finally:
+            try:
+                os.remove(lock)
+            except OSError:
+                pass
+    else:
+        main(force=True)
