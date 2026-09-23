@@ -264,20 +264,25 @@ def hedge_groups(ret):
     corr = ret.corr(min_periods=60)
     syms = list(corr.columns)
     n_days = int(ret.dropna(how="all").shape[0])
-    # 同向組：相關係數 >= CORR_GROUP 的商品連在一起（連通分量）
-    seen, gid = set(), 0
-    for s0 in syms:
-        if s0 in seen:
-            continue
-        comp, stack = [], [s0]
-        seen.add(s0)
-        while stack:
-            a = stack.pop()
-            comp.append(a)
-            for b in syms:
-                if b not in seen and pd.notna(corr.at[a, b]) and corr.at[a, b] >= CORR_GROUP:
-                    seen.add(b)
-                    stack.append(b)
+    # 同向組：組內「每一對」相關係數都要 >= CORR_GROUP（complete linkage 聚合，不會被間接串進來）
+    def link(g1, g2):
+        vals = [corr.at[a, b] for a in g1 for b in g2]
+        return -2.0 if any(pd.isna(v) for v in vals) else float(min(vals))
+    clusters = [[s0] for s0 in syms]
+    while True:
+        best_v, best_ij = -2.0, None
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                v = link(clusters[i], clusters[j])
+                if v > best_v:
+                    best_v, best_ij = v, (i, j)
+        if best_ij is None or best_v < CORR_GROUP:
+            break
+        i, j = best_ij
+        clusters[i] = clusters[i] + clusters[j]
+        del clusters[j]
+    gid = 0
+    for comp in sorted(clusters, key=lambda c: (-len(c), sorted(c))):
         if len(comp) < 2:
             continue
         gid += 1
@@ -297,32 +302,37 @@ def hedge_groups(ret):
     members_of = {}
     for a in syms:
         members_of.setdefault(unit.get(a, a), []).append(a)
-    neg = {}
-    for i, a in enumerate(syms):
-        for b in syms[i + 1:]:
-            c = corr.at[a, b]
-            if pd.notna(c) and c <= CORR_HEDGE:
-                ua, ub = unit.get(a, a), unit.get(b, b)
-                if ua == ub:
-                    continue
-                key = tuple(sorted((ua, ub)))
-                neg.setdefault(key, []).append(float(c))
-    for (ua, ub), cs in sorted(neg.items()):
+    # 兩個單位之間「每一對」都 <= CORR_HEDGE 才合併成一列；否則只列出真的符合的那幾對
+    units = sorted(members_of)
+    hedge_rows = []
+    for i, ua in enumerate(units):
+        for ub in units[i + 1:]:
+            cs = [corr.at[a, b] for a in members_of[ua] for b in members_of[ub]]
+            if any(pd.isna(c) for c in cs):
+                continue
+            if max(cs) <= CORR_HEDGE:
+                hedge_rows.append((ua, ub, sorted(members_of[ua]), sorted(members_of[ub]), [float(c) for c in cs]))
+            else:
+                for a in members_of[ua]:
+                    for b in members_of[ub]:
+                        if corr.at[a, b] <= CORR_HEDGE:
+                            hedge_rows.append((a, b, [a], [b], [float(corr.at[a, b])]))
+    for ua, ub, ma, mb, cs in hedge_rows:
         name = f"反向避險 {ua} ↔ {ub}"
         conf = confidence(max(cs), n_days)
-        la, lb = ", ".join(sorted(members_of[ua])), ", ".join(sorted(members_of[ub]))
+        la, lb = ", ".join(ma), ", ".join(mb)
         corr_txt = f"{cs[0]:.2f}" if len(cs) == 1 else f"平均 {np.mean(cs):.2f}（最弱 {max(cs):.2f}）"
         rows.append([name, f"{la}  ↔  {lb}", corr_txt,
                      f"D1 報酬率相關係數 ≤ {CORR_HEDGE:.2f}（近 {n_days} 天實測）",
                      "兩邊走勢相反：兩邊同方向持有可互相避險；一邊多一邊空＝加碼同一風險", conf])
-        for u, other in ((ua, lb), (ub, la)):
-            for x in members_of[u]:
+        for group, other in ((ma, lb), (mb, la)):
+            for x in group:
                 if x not in member:
                     member[x] = (name, other, conf)
     solo = sorted(s for s in syms if s not in member)
     if solo:
         rows.append(["獨立商品", ", ".join(solo), "",
-                     f"與其他商品相關係數都在 {CORR_HEDGE:.2f} ~ {CORR_GROUP:.2f} 之間",
+                     f"沒有和其他商品同時滿足 ≥ {CORR_GROUP:.2f}（同向組）或 ≤ {CORR_HEDGE:.2f}（反向）",
                      "走勢相對獨立，可單獨操作、分散風險", f"（{n_days} 天樣本）"])
         for s0 in solo:
             member[s0] = ("獨立商品", "", f"（{n_days} 天樣本）")
