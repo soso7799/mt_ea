@@ -332,7 +332,7 @@ def hedge_groups(ret):
     solo = sorted(s for s in syms if s not in member)
     if solo:
         rows.append(["獨立商品", ", ".join(solo), "",
-                     f"沒有和其他商品同時滿足 ≥ {CORR_GROUP:.2f}（同向組）或 ≤ {CORR_HEDGE:.2f}（反向）",
+                     f"無法和其他商品組成每一對都 ≥ {CORR_GROUP:.2f} 的同向組，也沒有 ≤ {CORR_HEDGE:.2f} 的反向對",
                      "走勢相對獨立，可單獨操作、分散風險", f"（{n_days} 天樣本）"])
         for s0 in solo:
             member[s0] = ("獨立商品", "", f"（{n_days} 天樣本）")
