@@ -7,7 +7,7 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
 
 防止「參數挑到剛好好看」：每個商品×週期把歷史切成前 70%（挑參數）和後 30%（驗證）。
 每種規則只在前 70% 挑出最好的那組參數，再看它在「沒看過」的後 30% 表現。
-判定「有效」：前70%、後30% 都賺，後30% 獲利因子 >= 1.2，且後30% 平均報酬 t 值 >= 2（排除運氣）。
+判定「有效」：前70%、後30% 都賺，後30% 獲利因子 >= 1.2，且後30% 平均報酬 t 值 >= 2.5（排除運氣）。
 
 規則（全部是 K 棒收盤出訊號、下一根開盤進場，不偷看未來）：
   S0 投票翻邊        ：目前儀表板的 11 指標多數決，翻邊就反手（對照組，無參數）
@@ -16,6 +16,9 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
   S3 前日高低突破    ：收盤突破前一日高做多 / 跌破前一日低做空（只測 H1）；停損停利同 S2，換日平倉
   S4 均線交叉        ：EMA 快慢線交叉就反手；(10,30) / (20,50) / (50,200)
   S5 通道突破        ：收盤突破前 N 根最高做多、跌破前 N 根最低做空，反向 N/2 通道出場；N = 20 / 55
+  S6 關卡突破+量+多空：H1/M15 收盤突破 亞/歐/美盤高低、今日高低、前日高低（當下已知的關卡）順勢進場；
+                      過濾：成交量 >= 前 20 根平均 1 / 1.5 / 2 倍 × 是否要求 11 指標多空同向；停損 1/1.5 × 停利 1.5/2/3 ATR
+  S7 關卡反轉+量+多空：同上關卡，盤中刺破但收盤收回（假突破）就反向進場；過濾與出場同 S6
 
 輸出：
   update_output\\strategy_test.csv      每個 商品×週期×規則：最佳參數、前70%/後30% 成績、判定
@@ -35,13 +38,18 @@ import pandas as pd
 
 OUT_DIR = r"G:\我的雲端硬碟\整理後\update_output"
 MERGED_DIRS = [r"G:\我的雲端硬碟\整理後\ExportCSV\merged", r"G:\我的雲端硬碟\ExportCSV\merged"]
-TFS = ["D1", "H4", "H1"]
-MAX_BARS = {"D1": 6000, "H4": 20000, "H1": 30000}   # 每個週期最多用最近幾根（控制執行時間）
+TFS = ["D1", "H4", "H1", "M15"]
+MAX_BARS = {"D1": 6000, "H4": 20000, "H1": 30000, "M15": 40000}   # 每個週期最多用最近幾根（控制執行時間）
+LEVEL_TFS = ("H1", "M15")        # 關卡突破/反轉只測日內週期
+SESSIONS = {"亞": (3, 12), "歐": (10, 19), "美": (16, 24)}   # FTMO 伺服器時間，跟 make_levels.py 一樣
+VOL_K = [1.0, 1.5, 2.0]          # 成交量 >= 前 20 根平均的幾倍（1.0 = 不過濾）
+LVL_SL, LVL_TP = [1.0, 1.5], [1.5, 2.0, 3.0]
+VERSION = "2"                    # 規則有改就換版本，會強制重跑
 SPLIT = 0.70
 MIN_TRADES_IS, MIN_TRADES_OOS = 30, 20
 RERUN_HOURS = 24
 SL_LIST, TP_LIST = [1.0, 1.5, 2.0], [1.5, 2.0, 3.0]
-T_MIN = 2.0              # 後30% 平均報酬 t 值門檻
+T_MIN = 2.5              # 後30% 平均報酬 t 值門檻（隨機資料校準過）
 
 
 # ------------------------------------------------------------------ 指標
@@ -163,6 +171,65 @@ def breakout_signals(df):
     return sig
 
 
+def level_events(df):
+    """逐根算出「當下已知」的關卡（只用到前一根為止的資料，不偷看）：
+       亞/歐/美盤高低（今天該時段已開始且有資料用今天的，否則用最近一次的）、今日高低、前日高低。
+       回傳 brk[i]：收盤向上突破某個高點類關卡 +1、向下跌破某個低點類關卡 -1
+            rev[i]：盤中刺破高點類關卡但收回下方 -1、刺破低點類關卡但收回上方 +1"""
+    t = df["datetime"]
+    days, hours = t.dt.date.tolist(), t.dt.hour.tolist()
+    o, h, l, c = (df[k].tolist() for k in ("open", "high", "low", "close"))
+    n = len(df)
+    brk, rev = [0] * n, [0] * n
+    last_sess, cur_sess = {}, {}
+    day_hi = day_lo = None
+    prev_hi = prev_lo = None
+    cur_day = None
+    for i in range(n):
+        if days[i] != cur_day:
+            if cur_day is not None:
+                for k, v in cur_sess.items():
+                    last_sess[k] = v
+                prev_hi, prev_lo = day_hi, day_lo
+            cur_day, cur_sess, day_hi, day_lo = days[i], {}, None, None
+        if i > 0:
+            highs, lows = [], []
+            for k in SESSIONS:
+                v = cur_sess.get(k) or last_sess.get(k)
+                if v:
+                    highs.append(v[0])
+                    lows.append(v[1])
+            if day_hi is not None:
+                highs.append(day_hi)
+                lows.append(day_lo)
+            if prev_hi is not None:
+                highs.append(prev_hi)
+                lows.append(prev_lo)
+            pc = c[i - 1]
+            up = any(pc <= L < c[i] for L in highs)
+            dn = any(pc >= L > c[i] for L in lows)
+            if up != dn:
+                brk[i] = 1 if up else -1
+            r_dn = any(pc < L < h[i] and c[i] < L for L in highs)
+            r_up = any(pc > L > l[i] and c[i] > L for L in lows)
+            if r_dn != r_up:
+                rev[i] = -1 if r_dn else 1
+        # 把第 i 根納入今天的統計
+        day_hi = h[i] if day_hi is None else max(day_hi, h[i])
+        day_lo = l[i] if day_lo is None else min(day_lo, l[i])
+        for k, (a_, z_) in SESSIONS.items():
+            if a_ <= hours[i] < z_:
+                v = cur_sess.get(k)
+                cur_sess[k] = (h[i], l[i]) if v is None else (max(v[0], h[i]), min(v[1], l[i]))
+    return brk, rev
+
+
+def volume_ratio(df):
+    v = df["volume"].astype(float) if "volume" in df.columns else pd.Series(np.ones(len(df)))
+    avg = v.rolling(20).mean().shift(1)
+    return (v / avg.replace(0, np.nan)).fillna(0).tolist()
+
+
 def donchian_want(df, n):
     hi_n = df["high"].rolling(n).max().shift(1).values
     lo_n = df["low"].rolling(n).min().shift(1).values
@@ -209,7 +276,7 @@ def split_stats(trades, cut):
 
 
 def verdict(is_s, oos):
-    """有效＝前70%和後30%都賺，且後30%的 t 值 >= 2（隨機資料很難做到）"""
+    """有效＝前70%和後30%都賺，且後30%的 t 值 >= T_MIN（隨機資料很難做到）"""
     if is_s["n"] < MIN_TRADES_IS or oos["n"] < MIN_TRADES_OOS:
         return "樣本不足"
     if is_s["avg"] > 0 and oos["avg"] > 0 and oos["pf"] >= 1.2 and oos["t"] >= T_MIN:
@@ -286,6 +353,20 @@ def test_series(sym, tf, df, spread):
         s4[f"EMA{f_}/{s_}"] = run_position(o, want, cost_frac)
     fams["S4 均線交叉"] = s4
     fams["S5 通道突破"] = {f"N{n}": run_position(o, donchian_want(df, n), cost_frac) for n in (20, 55)}
+    if tf in LEVEL_TFS:
+        brk, rev = level_events(df)
+        vr = volume_ratio(df)
+        for fam, ev in (("S6 關卡突破+量+多空", brk), ("S7 關卡反轉+量+多空", rev)):
+            combos = {}
+            for vk in VOL_K:
+                for vote_f in (False, True):
+                    sig = [e if e != 0 and vr[i] >= vk and (not vote_f or vote[i] == e) else 0
+                           for i, e in enumerate(ev)]
+                    for sl in LVL_SL:
+                        for tp in LVL_TP:
+                            key = (f"量≥{vk}倍" if vk > 1 else "不看量") + ("+多空同向" if vote_f else "") + f"+SL{sl}/TP{tp}"
+                            combos[key] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp, cost_frac)
+            fams[fam] = combos
 
     span_is = f"{df['datetime'].iloc[0]:%Y-%m-%d}~{df['datetime'].iloc[cut - 1]:%Y-%m-%d}"
     span_oos = f"{df['datetime'].iloc[cut]:%Y-%m-%d}~{df['datetime'].iloc[-1]:%Y-%m-%d}"
@@ -310,7 +391,12 @@ def test_series(sym, tf, df, spread):
 
 def main(force=False):
     path = os.path.join(OUT_DIR, "strategy_test.csv")
-    if not force and os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
+    ver_file = os.path.join(OUT_DIR, "strategy_test.version")
+    try:
+        same_ver = open(ver_file, encoding="utf-8").read().strip() == VERSION
+    except OSError:
+        same_ver = False
+    if not force and same_ver and os.path.exists(path) and time.time() - os.path.getmtime(path) < RERUN_HOURS * 3600:
         print(f"[規則測試] {RERUN_HOURS} 小時內跑過，這次略過")
         return
     try:   # 清掉之前背景版本留下的鎖定檔
@@ -352,6 +438,8 @@ def main(force=False):
                     "後30%交易數", "後30%勝率%", "後30%平均報酬%", "後30%總報酬%", "後30%獲利因子",
                     "後30%t值", "後30%最大連虧", "判定", "前70%期間", "後30%期間"])
         w.writerows(best)
+    with open(ver_file, "w", encoding="utf-8") as f:
+        f.write(VERSION)
     print(f"[規則測試] 完成：{len(best)} 列，耗時 {time.time() - t0:.0f} 秒")
 
 
