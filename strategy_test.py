@@ -24,6 +24,9 @@ strategy_test.py —— 用 merged 資料夾的完整歷史 K 棒，比較多種
   S9  趨勢方向+震盪拉回 ：趨勢組 4/5 個向上時，等震盪組 2/3 個「超賣」才買（空方相反）；停損停利 ATR
   S10 盤整震盪反轉      ：ADX < 20/25（盤整）時，震盪組 2/3 個超賣買、超買賣；停損停利 ATR
   S11 趨勢順勢進場      ：ADX >= 20/25（有趨勢）時，趨勢組剛轉成 4/5 個同向就順勢進場；停損停利 ATR
+  S12 抵銷後淨票數      ：多票減空票後的淨差夠大才判多空（原本儀表板等於淨差 >= 1）
+                        原 11 票淨差 >= 3/5/7；分組算法（趨勢組順向＋震盪組反向）淨差 >= 2/3/4
+                        兩種用法：淨差達標就持有 / 剛達標時進場＋停損停利 ATR
 
 輸出：
   update_output\\strategy_test.csv      每個 商品×週期×規則：最佳參數、前70%/後30% 成績、判定
@@ -54,6 +57,8 @@ TREND_K = [4, 5]                 # 趨勢組 6 個指標至少幾個同方向
 OSC_M = [2, 3]                   # 震盪組 5 個指標至少幾個同時超買/超賣
 ADX_LV = [20, 25]                # ADX 低於＝盤整、高於＝趨勢
 GRP_SL, GRP_TP = [1.5, 2.0], [2.0, 3.0]
+NET_TH_11 = [3, 5, 7]            # 原 11 票：多票-空票 淨差門檻（原本儀表板等於門檻 1）
+NET_TH_GRP = [2, 3, 4]           # 分組算法淨差門檻（趨勢組順向 + 震盪組反向，範圍 -11~+11）
 SPLIT = 0.70
 MIN_TRADES_IS, MIN_TRADES_OOS = 30, 20
 RERUN_HOURS = 24
@@ -66,7 +71,7 @@ def ema(s, n):
     return s.ewm(span=n, adjust=False).mean()
 
 
-def vote_series(df):
+def vote_series(df, return_net=False):
     """跟 build_extra_tables.py / 儀表板一樣的 11 指標投票：+1 多 / -1 空 / 0 無"""
     c, h, l = df["close"], df["high"], df["low"]
     sig = {}
@@ -95,6 +100,10 @@ def vote_series(df):
     longs, shorts = (m > 0).sum(axis=1), (m < 0).sum(axis=1)
     pos = np.where(longs > shorts, 1, np.where(shorts > longs, -1, 0))
     pos[m.isna().any(axis=1).values] = 0
+    if return_net:
+        net = (longs - shorts).values.astype(int)
+        net[m.isna().any(axis=1).values] = 0
+        return pos, net
     return pos
 
 
@@ -444,6 +453,27 @@ def test_series(sym, tf, df, spread):
             for sl in GRP_SL:
                 for tp_ in GRP_TP:
                     s11[f"ADX≥{lv}+趨勢{kk}/6+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp_, cost_frac)
+    # ---- S12 抵銷後淨票數：多票減空票，淨差夠大才判多空 ----
+    _, net11 = vote_series(df, return_net=True)
+    net_grp = [(tl[i] - ts[i]) + (osd[i] - obt[i]) if tok[i] else 0 for i in range(n_)]   # 趨勢組順向 + 震盪組反向
+    s12 = {}
+    for th in NET_TH_11:
+        want = [1 if x >= th else -1 if x <= -th else 0 for x in net11]
+        s12[f"原11票淨差≥{th} 持有"] = run_position(o, want, cost_frac)
+        ent = [0] + [(1 if net11[i] >= th > net11[i - 1] else -1 if net11[i] <= -th < net11[i - 1] else 0)
+                     for i in range(1, n_)]
+        for sl in GRP_SL:
+            for tp_ in GRP_TP:
+                s12[f"原11票淨差≥{th} 進場+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, ent, sl, tp_, cost_frac)
+    for th in NET_TH_GRP:
+        want = [1 if x >= th else -1 if x <= -th else 0 for x in net_grp]
+        s12[f"分組淨差≥{th} 持有"] = run_position(o, want, cost_frac)
+        ent = [0] + [(1 if net_grp[i] >= th > net_grp[i - 1] else -1 if net_grp[i] <= -th < net_grp[i - 1] else 0)
+                     for i in range(1, n_)]
+        for sl in GRP_SL:
+            for tp_ in GRP_TP:
+                s12[f"分組淨差≥{th} 進場+SL{sl}/TP{tp_}"] = run_sl_tp(o, h, l, c, a, days, ent, sl, tp_, cost_frac)
+    fams["S12 抵銷後淨票數"] = s12
     fams["S9 趨勢方向+震盪拉回進場"] = s9
     fams["S10 盤整(ADX低)震盪反轉"] = s10
     fams["S11 趨勢(ADX高)順勢進場"] = s11
