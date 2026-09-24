@@ -9,6 +9,9 @@ build_extra_tables.py —— 產生 Excel 另外 4 張表的資料（由 make_le
   hedge_groups.csv                  -> 波段避險分組（D1 報酬率相關係數實測分組）
   summary_all.csv                   -> 總整理（每個商品一列，彙整上面所有表）
 
+進場信號（EntrySignal）：只用 strategy_test.py 回測驗證過的規則（每個商品挑一條）：
+  可進場＝判定「有效」；觀察＝「可能有效」且 t>=2；排除＝回測扣點差後普遍虧損；其他＝無驗證規則（只看方向）
+
 回測規則（跟儀表板一致）：11 個指標投票，多頭票 > 空頭票就持多、反之持空，
 票數方向改變就平倉反手。每個週期用 MT5 最近 BACKTEST_BARS 根 K 棒。
 """
@@ -169,7 +172,18 @@ def build_session_table(mt5):
     return near
 
 
-def build_entry_table():
+def fmt_px(x, ref):
+    """跟現價一樣的小數位數"""
+    if x is None:
+        return ""
+    ref = str(ref or "")
+    d = len(ref.split(".")[1]) if "." in ref else (5 if abs(x) < 10 else 3 if abs(x) < 1000 else 2)
+    return f"{x:.{d}f}"
+
+
+def build_entry_table(live=None):
+    """EntrySignal 只用 strategy_test 驗證過的規則（live = strategy_test.live_entry_signals() 的結果）"""
+    live = live or {}
     status = {}
     for r in read_csv("multi_symbol_status.csv"):
         status[(r["Symbol"].strip(), r["Period"].strip())] = r
@@ -183,16 +197,16 @@ def build_entry_table():
             if m5_close.endswith(".0"):
                 m5_close = m5_close[:-2]
         td = trend.get(sym, "")
-        if td == "多頭" and st["M5"] == "多頭確認":
-            sig = "做多"
-        elif td == "空頭" and st["M5"] == "空頭確認":
-            sig = "做空"
-        else:
-            sig = "觀望"
-        rows.append([sym, td, st["D1"], st["H4"], st["H1"], st["M15"], st["M5"], m5_close, sig])
+        lv = live.get(sym) or dict(level="無歷史資料", signal="無歷史資料（merged 沒有這個商品）")
+        rows.append([sym, td, st["D1"], st["H4"], st["H1"], st["M15"], st["M5"], m5_close, lv["signal"],
+                     lv["level"], lv.get("rule", ""), lv.get("win", ""), lv.get("pf", ""), lv.get("t", ""),
+                     lv.get("time", ""), fmt_px(lv.get("entry"), m5_close), fmt_px(lv.get("sl"), m5_close),
+                     fmt_px(lv.get("tp"), m5_close), lv.get("bar", "")])
     write_csv("multi_symbol_entry_signals.csv",
               ["Symbol", "TrendDirection", "D1_Status", "H4_Status", "H1_Status",
-               "M15_Status", "M5_Status", "M5_LatestClose", "EntrySignal"], rows)
+               "M15_Status", "M5_Status", "M5_LatestClose", "EntrySignal",
+               "規則等級", "驗證規則", "後30%勝率%", "後30%獲利因子", "後30%t值",
+               "訊號時間", "進場價", "停損", "停利", "最新K棒"], rows)
     return sorted({s for s, _ in status})
 
 
@@ -384,12 +398,15 @@ def build_summary_table(best, last_trade, member, near):
                      f"{t[3]:.3f}" if t else "", fmt_t(t[4]) if t else "",
                      g[0], g[1], g[2],
                      (st.get((sym, "M5")) or {}).get("TrendlineSignal", ""),
-                     o.get("DataAsOf", "")])
+                     o.get("DataAsOf", ""),
+                     e.get("規則等級", ""), e.get("驗證規則", ""), e.get("進場價", ""), e.get("停損", ""),
+                     e.get("停利", "")])
     write_csv("summary_all.csv",
               ["Symbol", "現價", "今日開盤價", "漲跌%", "長週期趨勢", "D1", "H4", "H1", "M15", "M5",
                "進場信號", "最近關卡", "距離關卡", "關卡訊號", "最佳週期", "最佳週期勝率%",
                "最佳週期平均報酬%", "最近交易週期", "最近交易方向", "最近交易結果", "最近交易報酬%",
-               "最近交易時間", "避險分組", "同組商品", "分組可信度", "M5趨勢訊號", "最後更新時間"], rows)
+               "最近交易時間", "避險分組", "同組商品", "分組可信度", "M5趨勢訊號", "最後更新時間",
+               "規則等級", "驗證規則", "進場價", "停損", "停利"], rows)
 
 
 def main():
@@ -405,9 +422,23 @@ def main():
         near = build_session_table(mt5)
     except Exception as e:
         print(f"[額外報表] 時段壓力支撐 失敗：{e}")
+    status_syms = sorted({r["Symbol"].strip() for r in read_csv("multi_symbol_status.csv")})
+    if mt5 is not None:
+        try:
+            write_spreads(mt5, status_syms)
+        except Exception as e:
+            print(f"[額外報表] 點差 失敗：{e}")
+    # 規則比較測試：用 merged 歷史資料直接跑（24 小時內跑過就略過；第一次約需幾分鐘）
+    live = {}
+    try:
+        import strategy_test
+        strategy_test.main()
+        live = strategy_test.live_entry_signals(mt5)
+    except Exception as e:
+        print(f"[規則測試] 失敗：{e}")
     symbols = []
     try:
-        symbols = build_entry_table()
+        symbols = build_entry_table(live)
     except Exception as e:
         print(f"[額外報表] 進場信號 失敗：{e}")
     best, last_trade, member = {}, {}, {}
@@ -416,10 +447,6 @@ def main():
             best, last_trade = build_backtest_tables(mt5, symbols)
         except Exception as e:
             print(f"[額外報表] 回測 失敗：{e}")
-        try:
-            write_spreads(mt5, symbols)
-        except Exception as e:
-            print(f"[額外報表] 點差 失敗：{e}")
         try:
             member = build_hedge_table(mt5, symbols)
         except Exception as e:
@@ -431,12 +458,6 @@ def main():
         build_summary_table(best, last_trade, member, near)
     except Exception as e:
         print(f"[額外報表] 總整理 失敗：{e}")
-    # 規則比較測試：用 merged 歷史資料直接跑（24 小時內跑過就略過；第一次約需幾分鐘）
-    try:
-        import strategy_test
-        strategy_test.main()
-    except Exception as e:
-        print(f"[規則測試] 失敗：{e}")
 
 if __name__ == "__main__":
     main()

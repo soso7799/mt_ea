@@ -261,9 +261,14 @@ def atr(df, n=14):
 
 
 # ------------------------------------------------------------------ 交易引擎（回傳 [(出場索引, 報酬%)]）
+class Trades(list):
+    """交易清單，另外記住訊號序列和最後一筆還沒出場的部位（給即時進場信號用）"""
+    kind, sig, sl_k, tp_k, open = "pos", None, 0.0, 0.0, None
+
+
 def run_position(o, want, cost_frac):
     """want[i]：第 i 根收盤後想要的部位，第 i+1 根開盤執行"""
-    out, cur, entry = [], 0, 0.0
+    out, cur, entry, ent_i = Trades(), 0, 0.0, 0
     for i in range(len(o) - 1):
         w = want[i]
         if w == cur:
@@ -271,12 +276,16 @@ def run_position(o, want, cost_frac):
         px = o[i + 1]
         if cur != 0:
             out.append((i + 1, cur * (px - entry) / entry * 100 - cost_frac * 100))
-        cur, entry = w, px
+        cur, entry, ent_i = w, px, i + 1
+    out.sig = want
+    if cur != 0:
+        out.open = dict(i=ent_i, dir=cur, entry=entry, sl=None, tp=None)
     return out
 
 
 def run_sl_tp(o, h, l, c, a, days, sig, sl_k, tp_k, cost_frac, day_exit=False):
-    out, i, n = [], 0, len(o)
+    out, i, n = Trades(), 0, len(o)
+    out.kind, out.sig, out.sl_k, out.tp_k = "sltp", sig, sl_k, tp_k
     while i < n - 1:
         s = sig[i]
         if s == 0 or a[i] != a[i]:
@@ -303,6 +312,7 @@ def run_sl_tp(o, h, l, c, a, days, sig, sl_k, tp_k, cost_frac, day_exit=False):
             j += 1
         if px is None:
             j, px = n - 1, c[n - 1]
+            out.open = dict(i=i + 1, dir=s, entry=e, sl=sl, tp=tp)   # 最後一根還沒碰到停損停利＝持倉中
         out.append((j, s * (px - e) / e * 100 - cost_frac * 100))
         i = j + 1
     return out
@@ -486,13 +496,13 @@ def load(path, tf):
     return df
 
 
-def test_series(sym, tf, df, spread):
+def build_families(tf, df, spread):
+    """所有規則×參數的交易結果 {規則: {參數: Trades}}"""
     o, h, l, c = (df[k].tolist() for k in ("open", "high", "low", "close"))
     a = atr(df).tolist()
     days = df["datetime"].dt.date.tolist()
     price = float(np.median(df["close"].values))
     cost_frac = (spread / price) if spread else 0.0001
-    cut = int(len(df) * SPLIT)
     vote = [int(x) for x in vote_series(df)]
     fl = flips(vote)
     close = df["close"]
@@ -625,7 +635,12 @@ def test_series(sym, tf, df, spread):
                             key = (f"量≥{vk}倍" if vk > 1 else "不看量") + ("+多空同向" if vote_f else "") + f"+SL{sl}/TP{tp}"
                             combos[key] = run_sl_tp(o, h, l, c, a, days, sig, sl, tp, cost_frac)
             fams[fam] = combos
+    return fams
 
+
+def test_series(sym, tf, df, spread):
+    cut = int(len(df) * SPLIT)
+    fams = build_families(tf, df, spread)
     span_is = f"{df['datetime'].iloc[0]:%Y-%m-%d}~{df['datetime'].iloc[cut - 1]:%Y-%m-%d}"
     span_oos = f"{df['datetime'].iloc[cut]:%Y-%m-%d}~{df['datetime'].iloc[-1]:%Y-%m-%d}"
     best_rows, all_rows = [], []
@@ -699,6 +714,129 @@ def main(force=False):
     with open(ver_file, "w", encoding="utf-8") as f:
         f.write(VERSION)
     print(f"[規則測試] 完成：{len(best)} 列，耗時 {time.time() - t0:.0f} 秒")
+
+
+# ------------------------------------------------------------------ 即時進場信號（只用回測驗證過的規則）
+LIVE_BARS = 5000          # 即時計算用最近幾根（指標要暖機，太少會不準）
+WATCH_T = 2.0             # 「可能有效」且 t >= 這個值、交易數夠 → 列為「觀察」
+WATCH_MIN_N = 20
+EXCLUDE_PF = 0.80         # 商品所有規則後30% 獲利因子中位數低於這個 → 排除（點差吃掉一切）
+MT5_TF = {"D1": 16408, "H4": 16388, "H1": 16385, "M15": 15}   # MetaTrader5.TIMEFRAME_*
+
+
+def _f(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def pick_rules(path=None):
+    """讀 strategy_test.csv → {商品: (等級, 列)}；等級：可進場 / 觀察 / 排除 / 無驗證規則"""
+    path = path or os.path.join(OUT_DIR, "strategy_test.csv")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    by = {}
+    for r in rows:
+        by.setdefault(r["Symbol"].strip(), []).append(r)
+    out = {}
+    for sym, rs in by.items():
+        pfs = [_f(r["後30%獲利因子"]) for r in rs if (_f(r["後30%交易數"]) or 0) >= 30]
+        pfs = [x for x in pfs if x is not None]
+        if pfs and float(np.median(pfs)) < EXCLUDE_PF:
+            out[sym] = ("排除", None)
+            continue
+        good = [r for r in rs if r["判定"] == "有效"]
+        watch = [r for r in rs if r["判定"].startswith("可能") and (_f(r["後30%t值"]) or 0) >= WATCH_T
+                 and (_f(r["後30%交易數"]) or 0) >= WATCH_MIN_N]
+        if good:
+            out[sym] = ("可進場", max(good, key=lambda r: _f(r["後30%t值"]) or 0))
+        elif watch:
+            out[sym] = ("觀察", max(watch, key=lambda r: _f(r["後30%t值"]) or 0))
+        else:
+            out[sym] = ("無驗證規則", None)
+    return out
+
+
+def live_bars(sym, tf, mt5=None):
+    """最近 LIVE_BARS 根「已收盤」K 棒：先用 MT5，失敗再用 merged 檔"""
+    if mt5 is not None:
+        try:
+            mt5.symbol_select(sym, True)
+            r = mt5.copy_rates_from_pos(sym, getattr(mt5, "TIMEFRAME_" + tf, MT5_TF[tf]), 1, LIVE_BARS)   # 從 1 開始＝不含正在跑的那根
+            if r is not None and len(r) >= 500:
+                df = pd.DataFrame(r)
+                df["datetime"] = pd.to_datetime(df["time"], unit="s")
+                df["volume"] = df["tick_volume"].astype(float)
+                return df[["datetime", "open", "high", "low", "close", "volume"]].reset_index(drop=True), "MT5"
+        except Exception:
+            pass
+    mdir = find_merged_dir()
+    if mdir:
+        fpath = os.path.join(mdir, f"{sym}_{tf}_MERGED_ALL_DATA.csv")
+        if os.path.exists(fpath):
+            return load(fpath, tf).tail(LIVE_BARS).reset_index(drop=True), "merged"
+    return None, ""
+
+
+def live_signal(sym, row, mt5=None, spreads=None):
+    """用跟回測完全相同的程式算最新一根的狀態"""
+    tf, fam, key = row["週期"].strip(), row["規則"].strip(), row["最佳參數(前70%挑)"].strip()
+    df, src = live_bars(sym, tf, mt5)
+    if df is None or len(df) < 500:
+        return dict(state="沒有即時資料")
+    tr = build_families(tf, df, (spreads or {}).get(sym)).get(fam, {}).get(key)
+    if tr is None:
+        return dict(state="規則不存在（請重跑回測）")
+    a = atr(df)
+    c, t = df["close"].values, df["datetime"]
+    n = len(df)
+    res = dict(state="觀望", dir=0, time="", entry=None, sl=None, tp=None, bar=f"{t.iloc[-1]:%Y-%m-%d %H:%M}", src=src)
+    if tr.open is not None and tr.kind == "sltp":
+        op = tr.open
+        res.update(state="持倉中", dir=op["dir"], time=f"{t.iloc[op['i']]:%Y-%m-%d %H:%M}",
+                   entry=op["entry"], sl=op["sl"], tp=op["tp"])
+    elif tr.kind == "sltp" and tr.sig[n - 1] != 0 and not (tr and tr[-1][0] == n - 1):   # 剛出場那根的訊號回測不做
+        s = tr.sig[n - 1]
+        res.update(state="新訊號", dir=s, time=res["bar"], entry=c[-1],
+                   sl=c[-1] - s * tr.sl_k * a[-1], tp=c[-1] + s * tr.tp_k * a[-1])
+    elif tr.kind == "pos":
+        w = tr.sig[n - 1]
+        if w != 0 and (tr.open is None or tr.open["dir"] != w):      # 最後一根才翻向＝新訊號
+            res.update(state="新訊號", dir=w, time=res["bar"], entry=c[-1])
+        elif w == 0 and tr.open is not None:                          # 條件消失＝下一根開盤平倉
+            res.update(state="平倉", dir=tr.open["dir"], time=res["bar"], entry=tr.open["entry"])
+        elif tr.open is not None:
+            op = tr.open
+            res.update(state="持倉中", dir=op["dir"], time=f"{t.iloc[op['i']]:%Y-%m-%d %H:%M}", entry=op["entry"])
+    return res
+
+
+def live_entry_signals(mt5=None):
+    """{商品: dict(等級, 規則, 信號, 進場價, 停損, 停利 …)}；給 build_extra_tables.py 的進場信號表用"""
+    spreads = load_spreads()
+    out = {}
+    for sym, (lvl, row) in pick_rules().items():
+        d = dict(level=lvl, rule="", win="", pf="", t="", signal="", time="", entry=None, sl=None, tp=None, bar="")
+        if lvl == "排除":
+            d["signal"] = "排除（回測扣點差後虧損）"
+        elif row is None:
+            d["signal"] = "無驗證規則（只看方向）"
+        else:
+            d.update(rule=f"{row['週期']} {row['規則']}｜{row['最佳參數(前70%挑)']}",
+                     win=row["後30%勝率%"], pf=row["後30%獲利因子"], t=row["後30%t值"])
+            try:
+                r = live_signal(sym, row, mt5, spreads)
+            except Exception as e:
+                r = dict(state=f"計算失敗：{e}")
+            side = {1: "多", -1: "空"}.get(r.get("dir", 0), "")
+            txt = {"新訊號": f"做{side}", "持倉中": f"持{side}中", "平倉": f"平{side}單"}.get(r["state"], r["state"])
+            d.update(signal=(f"觀察：{txt}" if lvl == "觀察" else txt), time=r.get("time", ""),
+                     entry=r.get("entry"), sl=r.get("sl"), tp=r.get("tp"), bar=r.get("bar", ""))
+        out[sym] = d
+    return out
 
 
 def launch_background():
