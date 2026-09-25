@@ -51,7 +51,9 @@ import numpy as np
 import pandas as pd
 
 OUT_DIR = r"G:\我的雲端硬碟\整理後\update_output"
-MERGED_DIRS = [r"G:\我的雲端硬碟\整理後\ExportCSV\merged", r"G:\我的雲端硬碟\ExportCSV\merged"]
+MERGED_DIRS = [r"G:\我的雲端硬碟\整理後\ExportCSV\merged", r"G:\我的雲端硬碟\ExportCSV\merged",
+               r"G:\我的雲端硬碟\待搬移資料\整理後\ExportCSV\merged", r"G:\我的雲端硬碟\待搬移資料\ExportCSV\merged"]
+DRIVE_ROOT = r"G:\我的雲端硬碟"   # 上面都找不到時，往下 4 層自動找名為 merged 的資料夾（資料夾被搬走也找得到）
 TFS = ["D1", "H4", "H1", "M15"]
 MAX_BARS = {"D1": 6000, "H4": 20000, "H1": 30000, "M15": 40000}   # 每個週期最多用最近幾根（控制執行時間）
 LEVEL_TFS = ("H1", "M15")        # 關卡突破/反轉只測日內週期
@@ -462,10 +464,42 @@ def verdict(is_s, oos):
 
 
 # ------------------------------------------------------------------ 主程式
+def _merged_size(d):
+    """資料夾內 *_MERGED_ALL_DATA.csv 的總大小（空殼或測試用小檔的資料夾會很小）"""
+    total = 0
+    for f in glob.glob(os.path.join(d, "*_MERGED_ALL_DATA.csv")):
+        try:
+            total += os.path.getsize(f)
+        except OSError:
+            pass
+    return total
+
+
 def find_merged_dir():
-    for d in MERGED_DIRS:
-        if os.path.isdir(d) and glob.glob(os.path.join(d, "*_MERGED_ALL_DATA.csv")):
+    memo = os.path.join(OUT_DIR, "merged_dir.txt")      # 上次找到的位置
+    try:
+        d = open(memo, encoding="utf-8").read().strip()
+        if d and _merged_size(d) > 1_000_000:
             return d
+    except OSError:
+        pass
+    for d in MERGED_DIRS:
+        if _merged_size(d) > 1_000_000:
+            return d
+    best, best_size = None, 0
+    for depth in range(1, 5):
+        for d in glob.glob(os.path.join(DRIVE_ROOT, *(["*"] * (depth - 1)), "merged")):
+            if os.path.isdir(d):
+                size = _merged_size(d)
+                if size > best_size:
+                    best, best_size = d, size
+    if best and best_size > 1_000_000:
+        try:
+            with open(memo, "w", encoding="utf-8") as f:
+                f.write(best)
+        except OSError:
+            pass
+        return best
     return None
 
 
@@ -678,7 +712,7 @@ def main(force=False):
         pass
     mdir = find_merged_dir()
     if not mdir:
-        print(f"[規則測試] 找不到 merged 資料夾：{MERGED_DIRS}")
+        print(f"[規則測試] 找不到 merged 資料夾（{DRIVE_ROOT} 往下 4 層都沒有 *_MERGED_ALL_DATA.csv）")
         return
     spreads = load_spreads()
     t0 = time.time()
