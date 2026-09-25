@@ -1,0 +1,12 @@
+'==============================================================================
+' Paste into the SHEET module of the console worksheet
+' (VBA editor -> double-click the sheet under "Microsoft Excel Objects").
+' Re-runs the refresh silently whenever the A3 symbol drop-down changes.
+'==============================================================================
+Option Explicit
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    If Intersect(Target, Me.Range("A3")) Is Nothing Then Exit Sub
+    ' Refresh_All_Console_Data disables events itself, so no recursion.
+    Refresh_All_Console_Data Silent:=True
+End Sub
