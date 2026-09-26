@@ -32,7 +32,7 @@
    | 模式 | 「1 分鐘 OHLC」（速度快，且結果判斷本來就用 M1） |
    | 最佳化 | 停用 |
 
-4. 「輸入」分頁：`Inp_MLRecord = true`，其他參數保持實盤要用的值。
+4. 「輸入」分頁：`Inp_MLRecord = true`、`Inp_LegacySignalOrder = false`（v5.3 修正後的信號），其他參數保持實盤要用的值。
 5. 開始回測。結束後 `H:\ml\features\` 會出現 CSV。
    第一次回測 MT5 會下載 7 個商品的歷史資料，會比較久。
 

@@ -1,10 +1,11 @@
 //+------------------------------------------------------------------+
-//  MultiCurrency_EA.mq5  v5.2
+//  MultiCurrency_EA.mq5  v5.3
+//  v5.3：修正 GetOneSignal 指標陣列時間順序（[0] 改為最近收盤K）
 //  7幣別平等競爭，ATR動能排序
 //  5個指標全部同向 → 訂單上限由FilterLib控制
 //  風控全部由 FilterLib_v5.mqh 處理
 //------------------------------------------------------------------+
-#property version "5.20"
+#property version "5.30"
 #include <FilterLib_v5.mqh>
 #include <TradeLogger.mqh>
 #include <MLRecorder.mqh>
@@ -13,6 +14,7 @@ input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
+input bool Inp_LegacySignalOrder = false; // true=舊版陣列順序(修正前的行為，僅供回測比較)
 
 input group "=== Trade Log ==="
 input bool Inp_TradeLog         = true;  // 成交紀錄寫入 MQL5/Files/trade_logs/YYYY/MM/
@@ -224,7 +226,7 @@ int OnInit()
             Print("⚠️ ML: ATR handle 建立失敗: ",s);
       }
    }
-   Print("EA v5.2 started");
+   Print("EA v5.3 started");
    return INIT_SUCCEEDED;
 }
 
@@ -243,17 +245,27 @@ void OnDeinit(const int reason)
 }
 
 //------------------------------------------------------------------
+//  讀取指標值：從最近收盤的 K 線(shift 1)開始取 count 根。
+//  正常模式：series 順序，[0]=最近收盤，[1]=前一根…
+//  Inp_LegacySignalOrder=true：保留修正前的時間正序（[0]=最舊），僅供回測比較
+//------------------------------------------------------------------
+bool ReadBuf(int handle,int buffer,int count,double &buf[])
+{
+   ArraySetAsSeries(buf,!Inp_LegacySignalOrder);
+   return CopyBuffer(handle,buffer,1,count,buf)==count;
+}
+
 int GetOneSignal(int si,int indType)
 {
 
   // ================= EMA =================
 if(indType==0)
 {
-   double ef[3],es[3];
+   double ef[],es[];
    double c0=iClose(symbols[si],PERIOD_M12,1);
 
-   if(CopyBuffer(H[si].ef,0,1,3,ef)<3) return 0;
-   if(CopyBuffer(H[si].es,0,1,3,es)<3) return 0;
+   if(!ReadBuf(H[si].ef,0,3,ef)) return 0;
+   if(!ReadBuf(H[si].es,0,3,es)) return 0;
 
    double ef0=ef[0];
    double ef1=ef[1];
@@ -289,9 +301,9 @@ if(indType==0)
  // ================= RSI =================
 if(indType==1)
 {
-   double r[3];
+   double r[];
 
-   if(CopyBuffer(H[si].rsi,0,1,3,r)<3)
+   if(!ReadBuf(H[si].rsi,0,3,r))
       return 0;
 
    double r0=r[0];
@@ -329,11 +341,11 @@ if(indType==1)
 // ================= BB =================
 if(indType==2)
 {
-   double up[2],lo[2],mid[2];
+   double up[],lo[],mid[];
 
-   if(CopyBuffer(H[si].bb,0,1,2,mid)<2) return 0;
-   if(CopyBuffer(H[si].bb,1,1,2,up)<2)  return 0;
-   if(CopyBuffer(H[si].bb,2,1,2,lo)<2)  return 0;
+   if(!ReadBuf(H[si].bb,0,2,mid)) return 0;
+   if(!ReadBuf(H[si].bb,1,2,up))  return 0;
+   if(!ReadBuf(H[si].bb,2,2,lo))  return 0;
 
    double c0=iClose(symbols[si],PERIOD_M12,1);
    double c1=iClose(symbols[si],PERIOD_M12,2);
@@ -366,11 +378,11 @@ if(indType==2)
    // ================= MACD =================
 if(indType==3)
 {
-   double macd[3],signal[3],hist[3];
+   double macd[],signal[],hist[];
 
-   if(CopyBuffer(H[si].macd,0,1,3,macd)<3) return 0;
-   if(CopyBuffer(H[si].macd,1,1,3,signal)<3) return 0;
-   if(CopyBuffer(H[si].macd,2,1,3,hist)<3) return 0;
+   if(!ReadBuf(H[si].macd,0,3,macd))   return 0;
+   if(!ReadBuf(H[si].macd,1,3,signal)) return 0;
+   if(!ReadBuf(H[si].macd,2,3,hist))   return 0;
 
    double m0=macd[0];
    double m1=macd[1];
@@ -415,24 +427,28 @@ if(indType==3)
    // ================= STOCH =================
    if(indType==4)
    {
-      double kv[3],dv[3];
+      double kv[],dv[];
 
-      if(CopyBuffer(H[si].stoch,MAIN_LINE,1,3,kv)<3) return 0;
-      if(CopyBuffer(H[si].stoch,SIGNAL_LINE,1,3,dv)<3) return 0;
+      if(!ReadBuf(H[si].stoch,MAIN_LINE,3,kv))   return 0;
+      if(!ReadBuf(H[si].stoch,SIGNAL_LINE,3,dv)) return 0;
+
+      // c=最近收盤K，p=前一根；舊版順序下沿用原本的 [1]/[2]
+      int c = Inp_LegacySignalOrder ? 1 : 0;
+      int p = Inp_LegacySignalOrder ? 2 : 1;
 
       if(
-         kv[2]<=dv[2] &&
-         kv[1]>dv[1] &&
-         kv[1]<30 &&
-         kv[1]>kv[2]
+         kv[p]<=dv[p] &&
+         kv[c]>dv[c] &&
+         kv[c]<30 &&
+         kv[c]>kv[p]
       )
          return 1;
 
       if(
-         kv[2]>=dv[2] &&
-         kv[1]<dv[1] &&
-         kv[1]>70 &&
-         kv[1]<kv[2]
+         kv[p]>=dv[p] &&
+         kv[c]<dv[c] &&
+         kv[c]>70 &&
+         kv[c]<kv[p]
       )
          return -1;
 
@@ -683,7 +699,7 @@ void OnTick()
    for(int i=0;i<SYM_COUNT;i++)
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
    Comment(
-      "MultiCurrency EA v5.2\n",
+      "MultiCurrency EA v5.3\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       Inp_Sym1+"/"+Inp_Sym2+"/"+Inp_Sym3+"/"+
       Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"\n",
