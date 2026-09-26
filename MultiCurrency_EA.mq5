@@ -6,11 +6,16 @@
 //------------------------------------------------------------------+
 #property version "5.20"
 #include <FilterLib_v5.mqh>
+#include <TradeLogger.mqh>
 
 input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
+
+input group "=== Trade Log ==="
+input bool Inp_TradeLog         = true;  // 成交紀錄寫入 MQL5/Files/trade_logs/YYYY/MM/
+input bool Inp_TradeLogInTester = false; // 回測時也寫紀錄
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -73,6 +78,7 @@ input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 //------------------------------------------------------------------
 CFilterLib_Pro filter(Inp_Magic);
 CTrade         trade;
+CTradeLogger   tradeLog;
 
 #define SYM_COUNT 7
 #define IND_COUNT 5
@@ -80,6 +86,7 @@ int weight[IND_COUNT] = {3,2,1,2,1};
 
 string   symbols[SYM_COUNT];
 datetime lastBarTime[SYM_COUNT];
+int      lastScore[SYM_COUNT];   // 最近一次開倉的信號分數，寫入成交紀錄
 int startIndex=0;
 
 struct SHandles { int ef,es,rsi,bb,macd,stoch; };
@@ -160,6 +167,7 @@ double GetAtrPips(int si)
 int OnInit()
 {
    trade.SetExpertMagicNumber(Inp_Magic);
+   tradeLog.Init(Inp_Magic, Inp_TradeLog && (Inp_TradeLogInTester || !MQLInfoInteger(MQL_TESTER)));
 
    if(!filter.InitIndicators())
       return INIT_FAILED;
@@ -196,6 +204,7 @@ int OnInit()
          H[i].macd==INVALID_HANDLE||H[i].stoch==INVALID_HANDLE)
       { Print("Init failed: ",s); return INIT_FAILED; }
       lastBarTime[i]=0;
+      lastScore[i]=0;
    }
    Print("EA v5.2 started");
    return INIT_SUCCEEDED;
@@ -528,9 +537,23 @@ void TryOpenPositions()
       ok = trade.Sell(lot, sym, 0, sl, tp, "MC SELL");
 
    if(ok)
+   {
       MarkBarUsed(bestIndex);
+      lastScore[bestIndex]=bestScore;
+   }
    else
       Print("❌ 下單失敗: ", sym, " err=", GetLastError());
+}
+
+//------------------------------------------------------------------
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+{
+   int score=0;
+   for(int i=0;i<SYM_COUNT;i++)
+      if(symbols[i]==trans.symbol) { score=lastScore[i]; break; }
+   tradeLog.OnTransaction(trans,score);
 }
 
 //------------------------------------------------------------------

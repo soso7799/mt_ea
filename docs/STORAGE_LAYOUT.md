@@ -20,8 +20,8 @@ H:\
 ├─ export\
 │   ├─ bars\<商品>\<週期>\YYYY.csv   ← 匯出的 K 線 (M12/H1/D1…)
 │   └─ ticks\<商品>\YYYY-MM.csv
-├─ trade_logs\            ← EA 寫出的交易 / 信號紀錄（連結到 MQL5\Files）
-│   └─ YYYY\MM\
+├─ trade_logs\            ← EA 寫出的成交紀錄（連結到 MQL5\Files）
+│   └─ YYYY\MM\trades_<帳號>_YYYYMM.csv
 ├─ tester_reports\        ← 策略測試器報告、最佳化結果 (.htm/.xml)
 │   └─ v5.2\YYYYMMDD_<說明>\
 └─ backups\
@@ -38,7 +38,8 @@ H:\
 P:\
 ├─ src\mt_ea\             ← 本 repo 的 git clone（唯一的原始碼來源）
 │   ├─ MultiCurrency_EA.mq5
-│   └─ FilterLib_v5.mqh
+│   ├─ FilterLib_v5.mqh
+│   └─ TradeLogger.mqh
 ├─ releases\
 │   └─ v5.2\              ← 編譯好的 MultiCurrency_EA.ex5 + 發布說明
 ├─ presets\               ← 各帳戶 / 各版本的 .set 參數檔
@@ -65,7 +66,21 @@ MQL5 的檔案函式只能寫進沙盒 (`MQL5\Files` 或 `Common\Files`)，不�
 2. 執行 `scripts\deploy.bat` → 把 `.mq5/.mqh` 複製到本機 `MQL5\Experts`、`MQL5\Include`。
 3. 在 MetaEditor 編譯，把 `.ex5` 複製回 `P:\releases\<版本>\` 留存。
 
-## 4. 注意事項
+## 4. 成交紀錄 CSV（TradeLogger.mqh）
+
+EA 每筆成交（開倉、平倉、SL/TP 觸發、FilterLib 主動平倉）都會寫一列到
+`MQL5\Files\trade_logs\YYYY\MM\trades_<帳號>_YYYYMM.csv`，
+經由 symlink 實際存在歷史資料碟。
+
+欄位：`time,deal,position,symbol,type,entry,volume,price,sl,tp,profit,swap,commission,reason,score,balance,equity,comment`
+
+- `entry`：IN 開倉 / OUT 平倉；同一筆單的開平倉用 `position` 對應。
+- `reason`：SL / TP / EXPERT（EA 平倉）/ MANUAL / STOPOUT。
+- `score`：開倉時的加權信號分數（平倉列為 0）。
+- 網路碟暫時斷線時，寫入失敗的紀錄會先暫存在記憶體（最多 500 筆），恢復後按順序補寫；不影響下單。
+- EA 參數：`Inp_TradeLog` 開關；`Inp_TradeLogInTester` 回測時是否也寫（回測在測試代理的沙盒內，不會寫到網路碟）。
+
+## 5. 注意事項
 
 - **用 UNC 路徑，不要用磁碟代號建連結**：代號是每個登入工作階段各自對應的，
   以系統管理員身分執行的 cmd 看不到一般使用者對應的 `H:`/`P:`，排程或服務也看不到。

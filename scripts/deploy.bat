@@ -14,6 +14,7 @@ if not exist "%MT5_DATA%\MQL5" (
 )
 
 copy /Y "%SRC%\FilterLib_v5.mqh"      "%MT5_DATA%\MQL5\Include\" || exit /b 1
+copy /Y "%SRC%\TradeLogger.mqh"       "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\MultiCurrency_EA.mq5"  "%MT5_DATA%\MQL5\Experts\" || exit /b 1
 
 echo 已部署，請在 MetaEditor 按 F7 編譯，並把 .ex5 複製到 releases\^<版本^>\
