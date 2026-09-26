@@ -43,7 +43,9 @@ P:\
 │   ├─ MultiCurrency_EA.mq5
 │   ├─ FilterLib_v5.mqh
 │   ├─ TradeLogger.mqh
-│   └─ MLRecorder.mqh
+│   ├─ MLRecorder.mqh
+│   ├─ MLFilter.mqh
+│   └─ ml\train.py        ← 模型訓練（見 ML_PHASE2_3.md）
 ├─ releases\
 │   ├─ v5.2\              ← 編譯好的 MultiCurrency_EA.ex5 + 發布說明
 │   └─ models\            ← 訓練好的 .onnx 模型
@@ -62,6 +64,8 @@ MQL5 的檔案函式只能寫進沙盒 (`MQL5\Files` 或 `Common\Files`)，不�
 |---------|--------|
 | `<資料夾>\MQL5\Files\trade_logs` | `\\NAS\mt_history\trade_logs` |
 | `<資料夾>\MQL5\Profiles\Tester` 的報告輸出 | 手動或腳本搬到 `tester_reports` |
+| `%APPDATA%\MetaQuotes\Terminal\Common\Files\mt_ea_ml` | `H:\ml\features`（ML 訓練資料） |
+| `%APPDATA%\MetaQuotes\Terminal\Common\Files\mt_ea_models` | 執行程式碟 `releases\models`（ML 模型） |
 | `<資料夾>\bases`（可選） | `\\NAS\mt_history\bases` |
 
 `<資料夾>` = MT5「檔案 → 開啟資料夾」看到的路徑（`%APPDATA%\MetaQuotes\Terminal\<ID>`）。

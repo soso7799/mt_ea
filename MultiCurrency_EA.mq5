@@ -9,6 +9,7 @@
 #include <FilterLib_v5.mqh>
 #include <TradeLogger.mqh>
 #include <MLRecorder.mqh>
+#include <MLFilter.mqh>
 
 input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
@@ -23,6 +24,9 @@ input bool Inp_TradeLogInTester = false; // 回測時也寫紀錄
 input group "=== ML Data ==="
 input bool Inp_MLRecord       = false; // 記錄每個信號的特徵與結果(ML訓練資料)
 input int  Inp_MLMaxHoldHours = 72;    // 超過幾小時沒碰到SL/TP就標為逾時
+input bool   Inp_UseML       = false;                       // 用 ML 模型過濾信號
+input string Inp_MLModel     = "mt_ea_models\\model.onnx";  // 模型路徑（Common\Files 底下）
+input double Inp_MLThreshold = 0.55;                        // 機率低於此值不進場
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -87,6 +91,7 @@ CFilterLib_Pro filter(Inp_Magic);
 CTrade         trade;
 CTradeLogger   tradeLog;
 CMLRecorder    mlRec;
+CMLFilter      mlFilter;
 
 #define SYM_COUNT 7
 #define IND_COUNT 5
@@ -97,6 +102,23 @@ datetime lastBarTime[SYM_COUNT];
 int      lastScore[SYM_COUNT];   // 最近一次開倉的信號分數，寫入成交紀錄
 datetime mlLastBar[SYM_COUNT];   // ML 特徵紀錄：每根 K 線每個商品只記一次
 int      mlAtr[SYM_COUNT];       // ML 特徵用的 ATR(14) handle
+datetime mlProbBar[SYM_COUNT];   // ML 過濾：機率快取（每根 K 線算一次）
+double   mlProb[SYM_COUNT];
+
+// ML 特徵名稱（順序即模型輸入順序，與 ml/train.py 讀取的 f_ 欄位一一對應）
+// ⚠️ 增刪或調整順序都必須重新收集資料、重新訓練模型。
+#define ML_NF 26
+string g_mlNames[ML_NF] =
+{
+   "f_dir","f_spread_pips","f_score","f_opp_score",
+   "f_s_ema","f_s_rsi","f_s_bb","f_s_macd","f_s_stoch",
+   "f_atr_pips","f_ema_gap","f_ema_slope","f_close_ema",
+   "f_rsi_dev","f_rsi_chg","f_bb_pos","f_bb_width","f_bb_width_chg",
+   "f_macd","f_macd_hist","f_macd_hist_chg",
+   "f_stoch_k_dev","f_stoch_d_dev","f_hour_sin","f_hour_cos","f_dow"
+};
+
+double MLProbability(int si);
 int startIndex=0;
 
 struct SHandles { int ef,es,rsi,bb,macd,stoch; };
@@ -178,7 +200,8 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(Inp_Magic);
    tradeLog.Init(Inp_Magic, Inp_TradeLog && (Inp_TradeLogInTester || !MQLInfoInteger(MQL_TESTER)));
-   mlRec.Init(Inp_MLRecord, Inp_MLMaxHoldHours);
+   mlRec.Init(Inp_MLRecord, Inp_MLMaxHoldHours, g_mlNames);
+   if(Inp_UseML) mlFilter.Init(Inp_MLModel, ML_NF);
    ArrayInitialize(mlAtr,INVALID_HANDLE);
 
    if(!filter.InitIndicators())
@@ -218,8 +241,10 @@ int OnInit()
       lastBarTime[i]=0;
       lastScore[i]=0;
       mlLastBar[i]=0;
+      mlProbBar[i]=0;
+      mlProb[i]=-1;
       mlAtr[i]=INVALID_HANDLE;
-      if(Inp_MLRecord)
+      if(Inp_MLRecord || Inp_UseML)
       {
          mlAtr[i]=iATR(s,PERIOD_M12,14);
          if(mlAtr[i]==INVALID_HANDLE)
@@ -233,6 +258,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    mlRec.Flush();
+   mlFilter.Release();
    filter.DeinitIndicators();
 
    for(int i=0;i<SYM_COUNT;i++)
@@ -528,6 +554,14 @@ void TryOpenPositions()
 
       GetSignalWithConfirm(i,sig,confirm);
 
+      // ML 過濾：模型可用且機率低於門檻就放棄這個信號；模型不可用(-1)時照常
+      if(sig!=0 && Inp_UseML)
+      {
+         double p=MLProbability(i);
+         if(p>=0 && p<Inp_MLThreshold)
+            sig=0;
+      }
+
       sigArr[i]  = sig;
       confArr[i] = confirm;
    }
@@ -582,18 +616,34 @@ void TryOpenPositions()
 }
 
 //------------------------------------------------------------------
-//  ML 第1階段：特徵紀錄
-//  每根新 M12 K 線，對每個出現信號的商品記下當時的特徵，交給 mlRec 追蹤結果。
-//  只記錄、不影響下單。原始數值一律用 series 陣列：[0]=最近收盤K(shift1)，[1]=前一根。
+//  ML：特徵計算（訓練資料紀錄與實盤模型推論共用同一份，確保一致）
+//  原始數值一律用 series 陣列：[0]=最近收盤K(shift1)，[1]=前一根。
+//  有方向性的特徵都乘上 dir，讓買賣共用同一個模型（正值=對這筆單有利）。
+//  特徵清單 g_mlNames / ML_NF 定義在檔案開頭的全域區。
 //------------------------------------------------------------------
+
 bool CopySeries(int handle,int buffer,int count,double &buf[])
 {
    ArraySetAsSeries(buf,true);
    return CopyBuffer(handle,buffer,1,count,buf)==count;
 }
 
-bool BuildMLFeatures(int si,int sig,int score,int buyScore,int sellScore,
-                     const int &s[],datetime barTime,string &out)
+// 計算 5 個指標方向與加權分數，判斷規則與 GetSignalWithConfirm 相同
+void EvalSignal(int si,int &s[],int &buyScore,int &sellScore,int &sig,int &score)
+{
+   buyScore=0; sellScore=0; sig=0; score=0;
+   for(int t=0;t<IND_COUNT;t++)
+   {
+      s[t]=GetOneSignal(si,t);
+      if(s[t]==1)  buyScore+=weight[t];
+      if(s[t]==-1) sellScore+=weight[t];
+   }
+   if(buyScore>=Inp_MinConfirm && buyScore>sellScore)       { sig=1;  score=buyScore;  }
+   else if(sellScore>=Inp_MinConfirm && sellScore>buyScore) { sig=-1; score=sellScore; }
+}
+
+bool BuildMLFeatures(int si,int sig,int buyScore,int sellScore,
+                     const int &s[],datetime barTime,double &f[])
 {
    string sym=symbols[si];
    double atr[],ef[],es[],rsi[],bbM[],bbU[],bbL[],macd[],hist[],k[],d[];
@@ -607,35 +657,48 @@ bool BuildMLFeatures(int si,int sig,int score,int buyScore,int sellScore,
    if(!CopySeries(H[si].stoch,MAIN_LINE,1,k) ||
       !CopySeries(H[si].stoch,SIGNAL_LINE,1,d))                               return false;
 
+   double dir   = (double)sig;
    double a     = atr[0];
    double close = iClose(sym,PERIOD_M12,1);
    int    dgt   = (int)SymbolInfoInteger(sym,SYMBOL_DIGITS);
    double pip   = (dgt==2||dgt==3)?0.01:0.0001;
-   double spreadPips = (SymbolInfoDouble(sym,SYMBOL_ASK)-SymbolInfoDouble(sym,SYMBOL_BID))/pip;
    double bw0   = bbU[0]-bbL[0];
    double bw1   = bbU[1]-bbL[1];
-
    MqlDateTime t; TimeToStruct(barTime,t);
+   double hr    = 2.0*M_PI*t.hour/24.0;
 
-   out=StringFormat("%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%.1f,%.4f,%.4f,%.4f,%.2f,%.2f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f,%d,%d,%d,%d",
-      spreadPips, score, buyScore, sellScore,
-      s[0], s[1], s[2], s[3], s[4],
-      a/pip,
-      (ef[0]-es[0])/a,                    // ema_gap
-      (ef[0]-ef[1])/a,                    // ema_slope
-      (close-ef[0])/a,                    // close_ema
-      rsi[0], rsi[0]-rsi[1],
-      (bw0>0 ? (close-bbM[0])/bw0 : 0.0), // bb_pos：0=中軌，±0.5=上下軌
-      bw0/a,
-      (bw1>0 ? bw0/bw1 : 1.0),            // bb_width_chg
-      macd[0]/a, hist[0]/a, (hist[0]-hist[1])/a,
-      k[0], d[0],
-      t.hour, t.day_of_week,
-      HasPos(sym)?1:0,
-      filter.IsVolatilityNormal(sym)?1:0);
-   return true;
+   ArrayResize(f,ML_NF);
+   int n=0;
+   f[n++]=dir;
+   f[n++]=(SymbolInfoDouble(sym,SYMBOL_ASK)-SymbolInfoDouble(sym,SYMBOL_BID))/pip;
+   f[n++]=(sig>0)?buyScore:sellScore;
+   f[n++]=(sig>0)?sellScore:buyScore;
+   for(int i=0;i<IND_COUNT;i++) f[n++]=s[i]*dir;
+   f[n++]=a/pip;
+   f[n++]=(ef[0]-es[0])/a*dir;
+   f[n++]=(ef[0]-ef[1])/a*dir;
+   f[n++]=(close-ef[0])/a*dir;
+   f[n++]=(rsi[0]-50.0)*dir;
+   f[n++]=(rsi[0]-rsi[1])*dir;
+   f[n++]=(bw0>0 ? (close-bbM[0])/bw0 : 0.0)*dir;   // 0=中軌，+0.5=順向的通道邊緣
+   f[n++]=bw0/a;
+   f[n++]=(bw1>0 ? bw0/bw1 : 1.0);
+   f[n++]=macd[0]/a*dir;
+   f[n++]=hist[0]/a*dir;
+   f[n++]=(hist[0]-hist[1])/a*dir;
+   f[n++]=(k[0]-50.0)*dir;
+   f[n++]=(d[0]-50.0)*dir;
+   f[n++]=MathSin(hr);
+   f[n++]=MathCos(hr);
+   f[n++]=t.day_of_week;
+   return (n==ML_NF);
 }
 
+//------------------------------------------------------------------
+//  ML 第1階段：訓練資料紀錄
+//  每根新 M12 K 線，對每個出現信號的商品記下特徵，交給 mlRec 追蹤結果。
+//  只記錄、不影響下單。
+//------------------------------------------------------------------
 void RecordMLSignals()
 {
    if(!mlRec.Enabled()) return;
@@ -647,24 +710,14 @@ void RecordMLSignals()
       if(bt==0 || bt==mlLastBar[i]) continue;
 
       int s[IND_COUNT];
-      int buyScore=0,sellScore=0;
-      for(int t=0;t<IND_COUNT;t++)
-      {
-         s[t]=GetOneSignal(i,t);
-         if(s[t]==1)  buyScore+=weight[t];
-         if(s[t]==-1) sellScore+=weight[t];
-      }
+      int buyScore,sellScore,sig,score;
+      EvalSignal(i,s,buyScore,sellScore,sig,score);
 
-      // 與 GetSignalWithConfirm 相同的判斷
-      int sig=0,score=0;
-      if(buyScore>=Inp_MinConfirm && buyScore>sellScore)       { sig=1;  score=buyScore;  }
-      else if(sellScore>=Inp_MinConfirm && sellScore>buyScore) { sig=-1; score=sellScore; }
-
-      string feat;
+      double f[];
       double slD=0,tpD=0;
       if(sig!=0 && !filter.GetRuleDistances(symbols[i],slD,tpD))
          sig=0;
-      if(sig!=0 && !BuildMLFeatures(i,sig,score,buyScore,sellScore,s,bt,feat))
+      if(sig!=0 && !BuildMLFeatures(i,sig,buyScore,sellScore,s,bt,f))
          continue;   // 資料還沒準備好，下個 tick 再試
 
       mlLastBar[i]=bt;
@@ -672,8 +725,38 @@ void RecordMLSignals()
 
       double entry=(sig>0)?SymbolInfoDouble(symbols[i],SYMBOL_ASK)
                           :SymbolInfoDouble(symbols[i],SYMBOL_BID);
-      mlRec.Add(symbols[i],sig,entry,slD,tpD,TimeCurrent(),feat);
+      mlRec.Add(symbols[i],sig,entry,slD,tpD,TimeCurrent(),
+                HasPos(symbols[i]),filter.IsVolatilityNormal(symbols[i]),f);
    }
+}
+
+//------------------------------------------------------------------
+//  ML 第3階段：模型過濾
+//  回傳模型判斷「先到 TP」的機率；模型未載入或失敗回傳 -1（不過濾）。
+//  同一根 K 線同一商品只算一次。
+//------------------------------------------------------------------
+double MLProbability(int si)
+{
+   if(!mlFilter.Ready()) return -1;
+
+   datetime bt=iTime(symbols[si],PERIOD_M12,0);
+   if(bt!=0 && bt==mlProbBar[si]) return mlProb[si];
+
+   int s[IND_COUNT];
+   int buyScore,sellScore,sig,score;
+   EvalSignal(si,s,buyScore,sellScore,sig,score);
+
+   double p=-1;
+   double f[];
+   if(sig!=0 && BuildMLFeatures(si,sig,buyScore,sellScore,s,bt,f))
+      p=mlFilter.Predict(f);
+
+   if(p>=0)
+   {
+      mlProbBar[si]=bt;
+      mlProb[si]=p;
+   }
+   return p;
 }
 
 //------------------------------------------------------------------

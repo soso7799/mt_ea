@@ -42,22 +42,30 @@
 |------|------|
 | `signal_time, symbol, dir` | 信號時間（伺服器時間）、商品、方向（1 買 / -1 賣） |
 | `entry, sl, tp` | 假設進場價與 FilterLib 規則的 SL/TP |
-| `spread_pips` | 當下點差 |
-| `score, buy_score, sell_score` | 加權分數 |
-| `s_ema … s_stoch` | 5 個指標各自的方向（1/0/-1），就是策略實際用的判斷 |
-| `atr_pips` | M12 ATR(14) |
-| `ema_gap, ema_slope, close_ema` | EMA 快慢線差、快線斜率、收盤與快線距離（÷ATR） |
-| `rsi, rsi_chg` | RSI 值與變化 |
-| `bb_pos, bb_width, bb_width_chg` | 價格在布林通道的位置（0=中軌，±0.5=上下軌）、寬度÷ATR、寬度變化比 |
-| `macd, macd_hist, macd_hist_chg` | MACD 主線、柱狀體、柱狀體變化（÷ATR） |
-| `stoch_k, stoch_d` | 隨機指標 |
-| `hour, dow` | 伺服器時間的小時、星期幾（0=週日） |
-| `has_pos, vol_ok` | 當時該商品是否已有持倉、ATR 波動是否正常 |
+| `has_pos, vol_ok` | 當時該商品是否已有持倉、ATR 波動是否正常（訓練時預設只用 0 / 1 的列） |
+| `f_…` | **模型特徵**，共 26 個，順序就是模型輸入順序（見下表） |
 | **`label`** | **1=先到 TP，0=先到 SL，2=逾時，-1=回測結束時仍未有結果** |
 | `outcome_time, bars_held` | 結果發生時間、經過幾根 M1 |
 | `mfe_r, mae_r` | 最大有利 / 不利幅度，以「SL 距離」為 1R |
 
+有方向性的特徵都已乘上 `dir`：**正值代表對這筆單有利**，買賣共用同一個模型。
+
+| 特徵 | 說明 |
+|------|------|
+| `f_dir` | 方向 |
+| `f_spread_pips` | 當下點差 |
+| `f_score, f_opp_score` | 本方向 / 反方向的加權分數 |
+| `f_s_ema … f_s_stoch` | 5 個指標各自的方向 × dir（1=同向，-1=反向，0=無信號） |
+| `f_atr_pips` | M12 ATR(14) |
+| `f_ema_gap, f_ema_slope, f_close_ema` | EMA 快慢線差、快線斜率、收盤與快線距離（÷ATR） |
+| `f_rsi_dev, f_rsi_chg` | RSI−50、RSI 變化 |
+| `f_bb_pos, f_bb_width, f_bb_width_chg` | 價格在布林通道的位置（0=中軌，+0.5=順向邊緣）、寬度÷ATR、寬度變化比 |
+| `f_macd, f_macd_hist, f_macd_hist_chg` | MACD 主線、柱狀體、柱狀體變化（÷ATR） |
+| `f_stoch_k_dev, f_stoch_d_dev` | 隨機指標 K−50、D−50 |
+| `f_hour_sin, f_hour_cos, f_dow` | 伺服器時間的小時（週期編碼）、星期幾 |
+
 所有數值特徵都用**最近一根已收盤的 K 線**，不會偷看未來。
+EA 實盤用模型時，用的是**同一個函式** `BuildMLFeatures()` 產生特徵，訓練與實盤一致。
 
 ## 標記方式的限制
 
@@ -67,7 +75,6 @@
 - 同一商品連續幾根 K 線都出現同向信號時，每根都會記一筆，彼此高度相關；
   第 2 階段驗證時會依時間切分處理。
 
-## 交給第 2 階段
+## 下一步
 
-回測完成後，告訴我 CSV 的筆數和 `label` 的分佈
-（Excel 打開後對 `label` 欄做篩選即可），或直接把檔案傳給我。
+資料收集好之後，見 [ML_PHASE2_3.md](ML_PHASE2_3.md) 訓練模型並放進 EA。

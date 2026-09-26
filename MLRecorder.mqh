@@ -25,7 +25,9 @@ struct SMLPending
    double   mfe;         // 最大有利 (價格)
    double   mae;         // 最大不利 (價格)
    int      bars;
-   string   features;
+   bool     hasPos;
+   bool     volOk;
+   string   features;    // 已格式化的 f_ 特徵值
 };
 
 class CMLRecorder
@@ -34,16 +36,14 @@ private:
    bool       m_enabled;
    string     m_file;
    int        m_maxHoldMin;
+   string     m_featHeader;
    datetime   m_lastM1;
    SMLPending m_pend[];
 
    string Header()
    {
-      return "signal_time,symbol,dir,entry,sl,tp,spread_pips,score,buy_score,sell_score,"
-             "s_ema,s_rsi,s_bb,s_macd,s_stoch,atr_pips,ema_gap,ema_slope,close_ema,"
-             "rsi,rsi_chg,bb_pos,bb_width,bb_width_chg,macd,macd_hist,macd_hist_chg,"
-             "stoch_k,stoch_d,hour,dow,has_pos,vol_ok,"
-             "label,outcome_time,bars_held,mfe_r,mae_r";
+      return "signal_time,symbol,dir,entry,sl,tp,has_pos,vol_ok," + m_featHeader +
+             ",label,outcome_time,bars_held,mfe_r,mae_r";
    }
 
    void WriteRow(const SMLPending &p, int label, datetime outTime)
@@ -58,9 +58,10 @@ private:
       FileSeek(h, 0, SEEK_END);
 
       int digits = (int)SymbolInfoInteger(p.sym, SYMBOL_DIGITS);
-      string row = StringFormat("%s,%s,%d,%s,%s,%s,%s,%d,%s,%d,%.3f,%.3f",
+      string row = StringFormat("%s,%s,%d,%s,%s,%s,%d,%d,%s,%d,%s,%d,%.3f,%.3f",
          TimeToString(p.sigTime, TIME_DATE|TIME_SECONDS), p.sym, p.dir,
          DoubleToString(p.entry, digits), DoubleToString(p.sl, digits), DoubleToString(p.tp, digits),
+         p.hasPos ? 1 : 0, p.volOk ? 1 : 0,
          p.features,
          label,
          (outTime > 0 ? TimeToString(outTime, TIME_DATE|TIME_MINUTES) : ""),
@@ -124,8 +125,12 @@ private:
 public:
    CMLRecorder() : m_enabled(false), m_maxHoldMin(72*60), m_lastM1(0) {}
 
-   void Init(bool enabled, int maxHoldHours)
+   void Init(bool enabled, int maxHoldHours, const string &featNames[])
    {
+      m_featHeader = "";
+      for(int i = 0; i < ArraySize(featNames); i++)
+         m_featHeader += (i > 0 ? "," : "") + featNames[i];
+
       m_enabled    = enabled;
       m_maxHoldMin = MathMax(1, maxHoldHours) * 60;
       ArrayResize(m_pend, 0);
@@ -147,9 +152,14 @@ public:
    bool Enabled() { return m_enabled; }
 
    void Add(string sym, int dir, double entry, double slDist, double tpDist,
-            datetime sigTime, string features)
+            datetime sigTime, bool hasPos, bool volOk, const double &f[])
    {
       if(!m_enabled || slDist <= 0) return;
+
+      string features = "";
+      for(int i = 0; i < ArraySize(f); i++)
+         features += (i > 0 ? "," : "") + StringFormat("%.6g", f[i]);
+
       int k = ArraySize(m_pend);
       ArrayResize(m_pend, k + 1);
       m_pend[k].sym       = sym;
@@ -163,6 +173,8 @@ public:
       m_pend[k].mfe       = 0;
       m_pend[k].mae       = 0;
       m_pend[k].bars      = 0;
+      m_pend[k].hasPos    = hasPos;
+      m_pend[k].volOk     = volOk;
       m_pend[k].features  = features;
    }
 

@@ -51,6 +51,13 @@ if exist "%COMMON_FILES%\mt_ea_ml" (
   mklink /D "%COMMON_FILES%\mt_ea_ml" "%DATA_ROOT%\ml\features" || exit /b 1
 )
 
+echo === 連結 Common\Files\mt_ea_models（ML 模型）===
+if exist "%COMMON_FILES%\mt_ea_models" (
+  echo 已存在，略過
+) else (
+  mklink /D "%COMMON_FILES%\mt_ea_models" "%PROG_ROOT%\releases\models" || exit /b 1
+)
+
 if "%LINK_BASES%"=="1" (
   echo === 搬移 bases 到網路碟 ^(請先關閉 MT5^) ===
   tasklist /FI "IMAGENAME eq terminal64.exe" | find /I "terminal64.exe" >nul && (
