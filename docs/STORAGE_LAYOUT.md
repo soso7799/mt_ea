@@ -44,7 +44,7 @@ P:\
 │   └─ v5.2\              ← 編譯好的 MultiCurrency_EA.ex5 + 發布說明
 ├─ presets\               ← 各帳戶 / 各版本的 .set 參數檔
 │   └─ v5.2_live.set, v5.2_demo.set
-├─ scripts\               ← setup_drives.bat、deploy.bat（本 repo 的 scripts\）
+├─ scripts\               ← setup_drives.bat、deploy.bat、find_mt5.bat（自動尋找 MT5 資料夾）
 └─ terminals\             ← (可選) 攜帶版 MT5，僅供測試機 / 備援使用，不跑實盤
 ```
 

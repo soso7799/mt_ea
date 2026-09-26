@@ -1,17 +1,13 @@
 @echo off
 chcp 65001 >nul
 REM ============================================================
-REM  從執行程式碟 (P:\src\mt_ea) 部署 EA 原始碼到本機 MT5，之後在 MetaEditor 編譯
+REM  從執行程式碟 (...\src\mt_ea) 部署 EA 原始碼到本機 MT5，之後在 MetaEditor 編譯
+REM  用法：deploy.bat [MT5資料夾ID]（不給會自動尋找）
 REM ============================================================
 setlocal
 
 set "SRC=%~dp0.."
-set "MT5_DATA=%APPDATA%\MetaQuotes\Terminal\REPLACE_WITH_TERMINAL_ID"
-
-if not exist "%MT5_DATA%\MQL5" (
-  echo [錯誤] 找不到 MT5 資料夾: %MT5_DATA%
-  exit /b 1
-)
+call "%~dp0find_mt5.bat" %1 || exit /b 1
 
 copy /Y "%SRC%\FilterLib_v5.mqh"      "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\TradeLogger.mqh"       "%MT5_DATA%\MQL5\Include\" || exit /b 1

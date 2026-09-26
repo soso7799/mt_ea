@@ -2,22 +2,28 @@
 chcp 65001 >nul
 REM ============================================================
 REM  建立歷史資料碟 / 執行程式碟的資料夾結構，並把 MT5 沙盒連結過去
-REM  請以「系統管理員」執行；路徑請用 UNC，不要用 H:/P: 代號
+REM  請以「系統管理員」執行
+REM  用法：setup_drives.bat [MT5資料夾ID]（不給會自動尋找）
 REM ============================================================
 setlocal
 
 REM ---- 依你的環境修改 ----
-set "DATA_ROOT=\\NAS\mt_history"
-set "PROG_ROOT=\\NAS\mt_run"
-set "MT5_DATA=%APPDATA%\MetaQuotes\Terminal\REPLACE_WITH_TERMINAL_ID"
+REM 歷史資料碟
+set "DATA_ROOT=H:"
+REM 執行程式碟：預設為本腳本所在的 ...\src\mt_ea\scripts 往上三層
+for %%I in ("%~dp0..\..\..") do set "PROG_ROOT=%%~fI"
 set "LINK_BASES=0"
 REM LINK_BASES=1 會把 bases 搬到網路碟（回測較慢，本機空間不足才用）
 
-if not exist "%MT5_DATA%\MQL5" (
-  echo [錯誤] 找不到 MT5 資料夾: %MT5_DATA%
-  echo 請在 MT5 中「檔案 ^> 開啟資料夾」取得正確路徑後修改 MT5_DATA
+if not exist "%DATA_ROOT%\" (
+  echo [錯誤] 看不到歷史資料碟 %DATA_ROOT%
+  echo 以系統管理員執行時可能看不到網路磁碟代號，請把 DATA_ROOT 改成 \\伺服器\分享名稱
   exit /b 1
 )
+
+call "%~dp0find_mt5.bat" %1 || exit /b 1
+echo 歷史資料碟: %DATA_ROOT%
+echo 執行程式碟: %PROG_ROOT%
 
 echo === 歷史資料碟 ===
 for %%D in (bases export\bars export\ticks trade_logs tester_reports backups) do (
