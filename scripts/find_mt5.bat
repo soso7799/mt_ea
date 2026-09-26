@@ -1,11 +1,13 @@
 @echo off
 REM ============================================================
-REM  自動尋找 MT5 資料夾，結果放在 MT5_DATA
-REM  用法：call find_mt5.bat [資料夾ID]
-REM    - 有給 ID：直接使用 %APPDATA%\MetaQuotes\Terminal\<ID>
-REM    - 只找到一個：自動使用
-REM    - 找到多個：列出安裝位置讓你選，並記在 mt5_target.txt，下次自動使用
-REM      （要改選別套 MT5：刪除 scripts\mt5_target.txt）
+REM  Find the MT5 data folder and return it in MT5_DATA.
+REM  Usage: call find_mt5.bat [FolderID]
+REM    - FolderID given : use %APPDATA%\MetaQuotes\Terminal\<FolderID>
+REM    - one folder     : use it
+REM    - several        : show a menu; the choice is saved in
+REM                       mt5_target.txt and reused next time
+REM                       (delete mt5_target.txt to choose again)
+REM  NOTE: keep this file ASCII-only. cmd misreads UTF-8 batch files.
 REM ============================================================
 setlocal EnableDelayedExpansion
 set "TERM_ROOT=%APPDATA%\MetaQuotes\Terminal"
@@ -21,7 +23,7 @@ if exist "%SAVED%" (
   set /p SAVED_ID=<"%SAVED%"
   if exist "%TERM_ROOT%\!SAVED_ID!\MQL5" (
     set "SEL=%TERM_ROOT%\!SAVED_ID!"
-    echo （使用上次選的 MT5；要改選請刪除 %SAVED%）
+    echo Using saved MT5 choice. To choose again, delete: %SAVED%
     goto :check
   )
 )
@@ -35,8 +37,8 @@ for /d %%T in ("%TERM_ROOT%\*") do (
 )
 
 if !N!==0 (
-  echo [錯誤] %TERM_ROOT% 底下找不到任何 MT5 資料夾
-  echo 請先開過一次 MT5，或在 MT5「檔案 ^> 開啟資料夾」確認位置
+  echo [ERROR] No MT5 data folder found under %TERM_ROOT%
+  echo Start MT5 once, or check File ^> Open Data Folder in MT5.
   endlocal & exit /b 1
 )
 
@@ -45,26 +47,27 @@ if !N!==1 (
   goto :check
 )
 
-echo 找到 !N! 個 MT5 資料夾：
+echo Found !N! MT5 data folders:
 for /l %%i in (1,1,!N!) do (
-  set "ORIGIN=（未知安裝位置）"
+  set "ORIGIN=(unknown install path)"
   if exist "!T%%i!\origin.txt" for /f "usebackq delims=" %%o in (`type "!T%%i!\origin.txt"`) do set "ORIGIN=%%o"
   echo   [%%i] !ORIGIN!
   echo       !T%%i!
 )
-set /p "PICK=請輸入編號: "
+set /p "PICK=Enter number: "
 if not defined T%PICK% (
-  echo [錯誤] 編號無效
+  echo [ERROR] Invalid number
   endlocal & exit /b 1
 )
 set "SEL=!T%PICK%!"
 for %%X in ("!SEL!") do (>"%SAVED%" echo %%~nxX)
+echo Saved. Next time this MT5 is used automatically.
 
 :check
 if not exist "%SEL%\MQL5" (
-  echo [錯誤] 找不到 MT5 資料夾: %SEL%
+  echo [ERROR] MT5 data folder not found: %SEL%
   endlocal & exit /b 1
 )
-echo 使用 MT5 資料夾: %SEL%
+echo MT5 data folder: %SEL%
 endlocal & set "MT5_DATA=%SEL%"
 exit /b 0

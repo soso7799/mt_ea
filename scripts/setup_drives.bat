@@ -1,67 +1,69 @@
 @echo off
-chcp 65001 >nul
 REM ============================================================
-REM  建立歷史資料碟 / 執行程式碟的資料夾結構，並把 MT5 沙盒連結過去
-REM  請以「系統管理員」執行
-REM  用法：setup_drives.bat [MT5資料夾ID]（不給會自動尋找）
+REM  Create the folder layout on the history drive and the program
+REM  drive, and link the MT5 file sandboxes to them.
+REM  Run as Administrator.
+REM  Usage: setup_drives.bat [MT5 FolderID]   (auto-detected if omitted)
+REM  NOTE: keep this file ASCII-only. cmd misreads UTF-8 batch files.
 REM ============================================================
 setlocal
 
-REM ---- 依你的環境修改 ----
-REM 歷史資料碟
+REM ---- edit for your setup ----
+REM History drive
 set "DATA_ROOT=H:"
-REM 執行程式碟：預設為本腳本所在的 ...\src\mt_ea\scripts 往上三層
+REM Program drive: three levels above this script (...\src\mt_ea\scripts)
 for %%I in ("%~dp0..\..\..") do set "PROG_ROOT=%%~fI"
+REM LINK_BASES=1 moves MT5 "bases" to the history drive (slower backtests)
 set "LINK_BASES=0"
-REM LINK_BASES=1 會把 bases 搬到網路碟（回測較慢，本機空間不足才用）
 
 if not exist "%DATA_ROOT%\" (
-  echo [錯誤] 看不到歷史資料碟 %DATA_ROOT%
-  echo 以系統管理員執行時可能看不到網路磁碟代號，請把 DATA_ROOT 改成 \\伺服器\分享名稱
+  echo [ERROR] Cannot see history drive %DATA_ROOT%
+  echo As Administrator, mapped drive letters may be hidden.
+  echo Set DATA_ROOT to the network path, e.g. \\server\share
   exit /b 1
 )
 
 call "%~dp0find_mt5.bat" %1 || exit /b 1
-echo 歷史資料碟: %DATA_ROOT%
-echo 執行程式碟: %PROG_ROOT%
+echo History drive: %DATA_ROOT%
+echo Program drive: %PROG_ROOT%
 
-echo === 歷史資料碟 ===
+echo === History drive folders ===
 for %%D in (bases export\bars export\ticks trade_logs tester_reports backups ml\features ml\reports) do (
   if not exist "%DATA_ROOT%\%%D" mkdir "%DATA_ROOT%\%%D"
 )
 
-echo === 執行程式碟 ===
+echo === Program drive folders ===
 for %%D in (src releases releases\models presets scripts terminals) do (
   if not exist "%PROG_ROOT%\%%D" mkdir "%PROG_ROOT%\%%D"
 )
 
-echo === 連結 MQL5\Files\trade_logs ===
+echo === Link MQL5\Files\trade_logs (trade log CSV) ===
 if exist "%MT5_DATA%\MQL5\Files\trade_logs" (
-  echo 已存在，略過
+  echo Already exists, skipped
 ) else (
   mklink /D "%MT5_DATA%\MQL5\Files\trade_logs" "%DATA_ROOT%\trade_logs" || exit /b 1
 )
 
-echo === 連結 Common\Files\mt_ea_ml（ML 訓練資料）===
+echo === Link Common\Files\mt_ea_ml (ML training data) ===
 set "COMMON_FILES=%APPDATA%\MetaQuotes\Terminal\Common\Files"
 if not exist "%COMMON_FILES%" mkdir "%COMMON_FILES%"
 if exist "%COMMON_FILES%\mt_ea_ml" (
-  echo 已存在，略過
+  echo Already exists, skipped
 ) else (
   mklink /D "%COMMON_FILES%\mt_ea_ml" "%DATA_ROOT%\ml\features" || exit /b 1
 )
 
-echo === 連結 Common\Files\mt_ea_models（ML 模型）===
+echo === Link Common\Files\mt_ea_models (ML models) ===
 if exist "%COMMON_FILES%\mt_ea_models" (
-  echo 已存在，略過
+  echo Already exists, skipped
 ) else (
   mklink /D "%COMMON_FILES%\mt_ea_models" "%PROG_ROOT%\releases\models" || exit /b 1
 )
 
 if "%LINK_BASES%"=="1" (
-  echo === 搬移 bases 到網路碟 ^(請先關閉 MT5^) ===
+  echo === Move bases to history drive ^(close MT5 first^) ===
   tasklist /FI "IMAGENAME eq terminal64.exe" | find /I "terminal64.exe" >nul && (
-    echo [錯誤] MT5 仍在執行，請先關閉
+    echo [ERROR] MT5 is still running. Close it first.
     exit /b 1
   )
   robocopy "%MT5_DATA%\bases" "%DATA_ROOT%\bases" /E /MOVE /R:2 /W:5
@@ -70,5 +72,5 @@ if "%LINK_BASES%"=="1" (
   mklink /D "%MT5_DATA%\bases" "%DATA_ROOT%\bases" || exit /b 1
 )
 
-echo 完成。
+echo Done.
 endlocal

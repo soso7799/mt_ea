@@ -1,8 +1,9 @@
 @echo off
-chcp 65001 >nul
 REM ============================================================
-REM  從執行程式碟 (...\src\mt_ea) 部署 EA 原始碼到本機 MT5，之後在 MetaEditor 編譯
-REM  用法：deploy.bat [MT5資料夾ID]（不給會自動尋找）
+REM  Copy the EA source from this folder (...\src\mt_ea) into the
+REM  local MT5, then compile in MetaEditor (F7).
+REM  Usage: deploy.bat [MT5 FolderID]   (auto-detected if omitted)
+REM  NOTE: keep this file ASCII-only. cmd misreads UTF-8 batch files.
 REM ============================================================
 setlocal
 
@@ -15,5 +16,7 @@ copy /Y "%SRC%\MLRecorder.mqh"        "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\MLFilter.mqh"          "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\MultiCurrency_EA.mq5"  "%MT5_DATA%\MQL5\Experts\" || exit /b 1
 
-echo 已部署，請在 MetaEditor 按 F7 編譯，並把 .ex5 複製到 releases\^<版本^>\
+echo.
+echo Deployed. Open MetaEditor, press F7 to compile MultiCurrency_EA.mq5,
+echo then copy the .ex5 to releases\^<version^>\
 endlocal
