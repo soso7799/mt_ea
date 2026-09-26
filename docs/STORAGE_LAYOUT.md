@@ -22,6 +22,9 @@ H:\
 │   └─ ticks\<商品>\YYYY-MM.csv
 ├─ trade_logs\            ← EA 寫出的成交紀錄（連結到 MQL5\Files）
 │   └─ YYYY\MM\trades_<帳號>_YYYYMM.csv
+├─ ml\
+│   ├─ features\          ← ML 訓練資料（連結到 Common\Files\mt_ea_ml，見 ML_PHASE1.md）
+│   └─ reports\           ← 模型驗證報告
 ├─ tester_reports\        ← 策略測試器報告、最佳化結果 (.htm/.xml)
 │   └─ v5.2\YYYYMMDD_<說明>\
 └─ backups\
@@ -39,9 +42,11 @@ P:\
 ├─ src\mt_ea\             ← 本 repo 的 git clone（唯一的原始碼來源）
 │   ├─ MultiCurrency_EA.mq5
 │   ├─ FilterLib_v5.mqh
-│   └─ TradeLogger.mqh
+│   ├─ TradeLogger.mqh
+│   └─ MLRecorder.mqh
 ├─ releases\
-│   └─ v5.2\              ← 編譯好的 MultiCurrency_EA.ex5 + 發布說明
+│   ├─ v5.2\              ← 編譯好的 MultiCurrency_EA.ex5 + 發布說明
+│   └─ models\            ← 訓練好的 .onnx 模型
 ├─ presets\               ← 各帳戶 / 各版本的 .set 參數檔
 │   └─ v5.2_live.set, v5.2_demo.set
 ├─ scripts\               ← setup_drives.bat、deploy.bat、find_mt5.bat（自動尋找 MT5 資料夾）

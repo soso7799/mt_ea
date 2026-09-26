@@ -26,12 +26,12 @@ echo 歷史資料碟: %DATA_ROOT%
 echo 執行程式碟: %PROG_ROOT%
 
 echo === 歷史資料碟 ===
-for %%D in (bases export\bars export\ticks trade_logs tester_reports backups) do (
+for %%D in (bases export\bars export\ticks trade_logs tester_reports backups ml\features ml\reports) do (
   if not exist "%DATA_ROOT%\%%D" mkdir "%DATA_ROOT%\%%D"
 )
 
 echo === 執行程式碟 ===
-for %%D in (src releases presets scripts terminals) do (
+for %%D in (src releases releases\models presets scripts terminals) do (
   if not exist "%PROG_ROOT%\%%D" mkdir "%PROG_ROOT%\%%D"
 )
 
@@ -40,6 +40,15 @@ if exist "%MT5_DATA%\MQL5\Files\trade_logs" (
   echo 已存在，略過
 ) else (
   mklink /D "%MT5_DATA%\MQL5\Files\trade_logs" "%DATA_ROOT%\trade_logs" || exit /b 1
+)
+
+echo === 連結 Common\Files\mt_ea_ml（ML 訓練資料）===
+set "COMMON_FILES=%APPDATA%\MetaQuotes\Terminal\Common\Files"
+if not exist "%COMMON_FILES%" mkdir "%COMMON_FILES%"
+if exist "%COMMON_FILES%\mt_ea_ml" (
+  echo 已存在，略過
+) else (
+  mklink /D "%COMMON_FILES%\mt_ea_ml" "%DATA_ROOT%\ml\features" || exit /b 1
 )
 
 if "%LINK_BASES%"=="1" (

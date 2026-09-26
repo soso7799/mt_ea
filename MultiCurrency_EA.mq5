@@ -7,6 +7,7 @@
 #property version "5.20"
 #include <FilterLib_v5.mqh>
 #include <TradeLogger.mqh>
+#include <MLRecorder.mqh>
 
 input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
@@ -16,6 +17,10 @@ input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
 input group "=== Trade Log ==="
 input bool Inp_TradeLog         = true;  // 成交紀錄寫入 MQL5/Files/trade_logs/YYYY/MM/
 input bool Inp_TradeLogInTester = false; // 回測時也寫紀錄
+
+input group "=== ML Data ==="
+input bool Inp_MLRecord       = false; // 記錄每個信號的特徵與結果(ML訓練資料)
+input int  Inp_MLMaxHoldHours = 72;    // 超過幾小時沒碰到SL/TP就標為逾時
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -79,6 +84,7 @@ input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 CFilterLib_Pro filter(Inp_Magic);
 CTrade         trade;
 CTradeLogger   tradeLog;
+CMLRecorder    mlRec;
 
 #define SYM_COUNT 7
 #define IND_COUNT 5
@@ -87,6 +93,8 @@ int weight[IND_COUNT] = {3,2,1,2,1};
 string   symbols[SYM_COUNT];
 datetime lastBarTime[SYM_COUNT];
 int      lastScore[SYM_COUNT];   // 最近一次開倉的信號分數，寫入成交紀錄
+datetime mlLastBar[SYM_COUNT];   // ML 特徵紀錄：每根 K 線每個商品只記一次
+int      mlAtr[SYM_COUNT];       // ML 特徵用的 ATR(14) handle
 int startIndex=0;
 
 struct SHandles { int ef,es,rsi,bb,macd,stoch; };
@@ -168,6 +176,8 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(Inp_Magic);
    tradeLog.Init(Inp_Magic, Inp_TradeLog && (Inp_TradeLogInTester || !MQLInfoInteger(MQL_TESTER)));
+   mlRec.Init(Inp_MLRecord, Inp_MLMaxHoldHours);
+   ArrayInitialize(mlAtr,INVALID_HANDLE);
 
    if(!filter.InitIndicators())
       return INIT_FAILED;
@@ -205,6 +215,14 @@ int OnInit()
       { Print("Init failed: ",s); return INIT_FAILED; }
       lastBarTime[i]=0;
       lastScore[i]=0;
+      mlLastBar[i]=0;
+      mlAtr[i]=INVALID_HANDLE;
+      if(Inp_MLRecord)
+      {
+         mlAtr[i]=iATR(s,PERIOD_M12,14);
+         if(mlAtr[i]==INVALID_HANDLE)
+            Print("⚠️ ML: ATR handle 建立失敗: ",s);
+      }
    }
    Print("EA v5.2 started");
    return INIT_SUCCEEDED;
@@ -212,6 +230,7 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   mlRec.Flush();
    filter.DeinitIndicators();
 
    for(int i=0;i<SYM_COUNT;i++)
@@ -219,6 +238,7 @@ void OnDeinit(const int reason)
       IndicatorRelease(H[i].ef);   IndicatorRelease(H[i].es);
       IndicatorRelease(H[i].rsi);  IndicatorRelease(H[i].bb);
       IndicatorRelease(H[i].macd); IndicatorRelease(H[i].stoch);
+      if(mlAtr[i]!=INVALID_HANDLE) IndicatorRelease(mlAtr[i]);
    }
 }
 
@@ -546,6 +566,101 @@ void TryOpenPositions()
 }
 
 //------------------------------------------------------------------
+//  ML 第1階段：特徵紀錄
+//  每根新 M12 K 線，對每個出現信號的商品記下當時的特徵，交給 mlRec 追蹤結果。
+//  只記錄、不影響下單。原始數值一律用 series 陣列：[0]=最近收盤K(shift1)，[1]=前一根。
+//------------------------------------------------------------------
+bool CopySeries(int handle,int buffer,int count,double &buf[])
+{
+   ArraySetAsSeries(buf,true);
+   return CopyBuffer(handle,buffer,1,count,buf)==count;
+}
+
+bool BuildMLFeatures(int si,int sig,int score,int buyScore,int sellScore,
+                     const int &s[],datetime barTime,string &out)
+{
+   string sym=symbols[si];
+   double atr[],ef[],es[],rsi[],bbM[],bbU[],bbL[],macd[],hist[],k[],d[];
+
+   if(mlAtr[si]==INVALID_HANDLE || !CopySeries(mlAtr[si],0,1,atr) || atr[0]<=0) return false;
+   if(!CopySeries(H[si].ef,0,2,ef) || !CopySeries(H[si].es,0,1,es))           return false;
+   if(!CopySeries(H[si].rsi,0,2,rsi))                                         return false;
+   if(!CopySeries(H[si].bb,0,1,bbM) || !CopySeries(H[si].bb,1,2,bbU) ||
+      !CopySeries(H[si].bb,2,2,bbL))                                          return false;
+   if(!CopySeries(H[si].macd,0,1,macd) || !CopySeries(H[si].macd,2,2,hist))   return false;
+   if(!CopySeries(H[si].stoch,MAIN_LINE,1,k) ||
+      !CopySeries(H[si].stoch,SIGNAL_LINE,1,d))                               return false;
+
+   double a     = atr[0];
+   double close = iClose(sym,PERIOD_M12,1);
+   int    dgt   = (int)SymbolInfoInteger(sym,SYMBOL_DIGITS);
+   double pip   = (dgt==2||dgt==3)?0.01:0.0001;
+   double spreadPips = (SymbolInfoDouble(sym,SYMBOL_ASK)-SymbolInfoDouble(sym,SYMBOL_BID))/pip;
+   double bw0   = bbU[0]-bbL[0];
+   double bw1   = bbU[1]-bbL[1];
+
+   MqlDateTime t; TimeToStruct(barTime,t);
+
+   out=StringFormat("%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%.1f,%.4f,%.4f,%.4f,%.2f,%.2f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f,%d,%d,%d,%d",
+      spreadPips, score, buyScore, sellScore,
+      s[0], s[1], s[2], s[3], s[4],
+      a/pip,
+      (ef[0]-es[0])/a,                    // ema_gap
+      (ef[0]-ef[1])/a,                    // ema_slope
+      (close-ef[0])/a,                    // close_ema
+      rsi[0], rsi[0]-rsi[1],
+      (bw0>0 ? (close-bbM[0])/bw0 : 0.0), // bb_pos：0=中軌，±0.5=上下軌
+      bw0/a,
+      (bw1>0 ? bw0/bw1 : 1.0),            // bb_width_chg
+      macd[0]/a, hist[0]/a, (hist[0]-hist[1])/a,
+      k[0], d[0],
+      t.hour, t.day_of_week,
+      HasPos(sym)?1:0,
+      filter.IsVolatilityNormal(sym)?1:0);
+   return true;
+}
+
+void RecordMLSignals()
+{
+   if(!mlRec.Enabled()) return;
+
+   for(int i=0;i<SYM_COUNT;i++)
+   {
+      if(mlAtr[i]==INVALID_HANDLE) continue;
+      datetime bt=iTime(symbols[i],PERIOD_M12,0);
+      if(bt==0 || bt==mlLastBar[i]) continue;
+
+      int s[IND_COUNT];
+      int buyScore=0,sellScore=0;
+      for(int t=0;t<IND_COUNT;t++)
+      {
+         s[t]=GetOneSignal(i,t);
+         if(s[t]==1)  buyScore+=weight[t];
+         if(s[t]==-1) sellScore+=weight[t];
+      }
+
+      // 與 GetSignalWithConfirm 相同的判斷
+      int sig=0,score=0;
+      if(buyScore>=Inp_MinConfirm && buyScore>sellScore)       { sig=1;  score=buyScore;  }
+      else if(sellScore>=Inp_MinConfirm && sellScore>buyScore) { sig=-1; score=sellScore; }
+
+      string feat;
+      double slD=0,tpD=0;
+      if(sig!=0 && !filter.GetRuleDistances(symbols[i],slD,tpD))
+         sig=0;
+      if(sig!=0 && !BuildMLFeatures(i,sig,score,buyScore,sellScore,s,bt,feat))
+         continue;   // 資料還沒準備好，下個 tick 再試
+
+      mlLastBar[i]=bt;
+      if(sig==0) continue;
+
+      double entry=(sig>0)?SymbolInfoDouble(symbols[i],SYMBOL_ASK)
+                          :SymbolInfoDouble(symbols[i],SYMBOL_BID);
+      mlRec.Add(symbols[i],sig,entry,slD,tpD,TimeCurrent(),feat);
+   }
+}
+
+//------------------------------------------------------------------
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
@@ -560,7 +675,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 void OnTick()
 {
    filter.MonitorPositions();
+   RecordMLSignals();
    TryOpenPositions();
+   mlRec.Update();
 
    string posInfo="";
    for(int i=0;i<SYM_COUNT;i++)

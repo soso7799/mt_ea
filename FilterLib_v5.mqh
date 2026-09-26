@@ -864,6 +864,17 @@ public:
       return true;
    }
 
+   // SL/TP 距離（價格單位），不檢查任何開倉條件；供 ML 資料標記使用
+   bool GetRuleDistances(string sym, double &slDist, double &tpDist)
+   {
+      int idx = FindRule(sym);
+      if(idx < 0) return false;
+      double pip = PipSize(sym);
+      slDist = fx_rules[idx].sl_pips * pip;
+      tpDist = fx_rules[idx].tp_pips * pip;
+      return true;
+   }
+
    string GetStatusReport(string sym)
    {
       MqlDateTime t = LocalNow();
