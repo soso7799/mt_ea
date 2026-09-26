@@ -4,15 +4,26 @@ REM  自動尋找 MT5 資料夾，結果放在 MT5_DATA
 REM  用法：call find_mt5.bat [資料夾ID]
 REM    - 有給 ID：直接使用 %APPDATA%\MetaQuotes\Terminal\<ID>
 REM    - 只找到一個：自動使用
-REM    - 找到多個：列出安裝位置讓你選
+REM    - 找到多個：列出安裝位置讓你選，並記在 mt5_target.txt，下次自動使用
+REM      （要改選別套 MT5：刪除 scripts\mt5_target.txt）
 REM ============================================================
 setlocal EnableDelayedExpansion
 set "TERM_ROOT=%APPDATA%\MetaQuotes\Terminal"
 set "SEL="
+set "SAVED=%~dp0mt5_target.txt"
 
 if not "%~1"=="" (
   set "SEL=%TERM_ROOT%\%~1"
   goto :check
+)
+
+if exist "%SAVED%" (
+  set /p SAVED_ID=<"%SAVED%"
+  if exist "%TERM_ROOT%\!SAVED_ID!\MQL5" (
+    set "SEL=%TERM_ROOT%\!SAVED_ID!"
+    echo （使用上次選的 MT5；要改選請刪除 %SAVED%）
+    goto :check
+  )
 )
 
 set /a N=0
@@ -47,6 +58,7 @@ if not defined T%PICK% (
   endlocal & exit /b 1
 )
 set "SEL=!T%PICK%!"
+for %%X in ("!SEL!") do (>"%SAVED%" echo %%~nxX)
 
 :check
 if not exist "%SEL%\MQL5" (
