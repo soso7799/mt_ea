@@ -39,6 +39,10 @@ SL_M, TP_M = 0.5, 0.75              # 事先定好（H1 ATR 倍數）
 SLTP_INFO = [(0.5, 0.5), (0.5, 1.0), (1.0, 1.5)]
 P_HI, P_LO = 0.60, 0.40
 MIN_TRAIN_MONTHS = 3
+# 事先定好的時段假設（2026-09-27 看 2026-02 ~ 2026-09 的事件後提出）：
+# 伺服器 12 點與 15–18 點（美盤開盤前後）碰關卡偏反轉 → 只用 2026-02-01 以前、提出假設時沒看過的事件檢驗
+HYP_HOURS = [12, 15, 16, 17, 18]
+HYP_BEFORE = "2026-02-01"
 FEATS = ["J(3D-2K)", "J(3K-2D)", "J斜率", "MACD柱", "MACD柱斜率", "趨勢線突破同向", "趨勢線突破反向",
          "EMA20-50排列", "EMA8-21排列", "EMA50-200排列", "離EMA20", "TAI動能", "量比", "近3根量比", "靠近速度", "收盤穿越", "今日幅度",
          "共振數", "關卡_昨日", "關卡_時段", "關卡_上週", "關卡_近期擺動", "時段_亞", "時段_歐", "時段_美"]
@@ -173,11 +177,12 @@ def build_events(sym, m1, meta, commission):
             ii, e, x, R = ow.exits(i.copy(), d.copy(), o, h, l, c, sp, Aarr, sl_m, tp_m, comm_px)
             assert len(ii) == len(i)       # 事件都在 i < n-2 且 A > 0，全部有效、順序不變
             E[f"R_{mode}_{sl_m}_{tp_m}"] = R
+            # 不含成本（無點差、無手續費）—— 看指標本身有沒有優勢
+            _, _, _, R0 = ow.exits(i.copy(), d.copy(), o, h, l, c, np.zeros(n), Aarr, sl_m, tp_m, 0.0)
+            E[f"R0_{mode}_{sl_m}_{tp_m}"] = R0
             if (sl_m, tp_m) == (SL_M, TP_M):
                 E[f"e_{mode}"] = e
                 E[f"x_{mode}"] = x
-                # 不含成本（無點差、無手續費）—— 看指標本身有沒有優勢
-                _, _, _, R0 = ow.exits(i.copy(), d.copy(), o, h, l, c, np.zeros(n), Aarr, sl_m, tp_m, 0.0)
                 E[f"R0_{mode}"] = R0
     return E
 
@@ -345,6 +350,33 @@ def main():
                               判定=("✅ 可用" if ok else ("❌" if which == "模型" else "對照"))))
     del fx_mask
     S = pd.DataFrame(strat)
+
+    # 各時段突破率（前半 / 後半）
+    Lb = E[lab].assign(hour=E.loc[lab, "time"].dt.hour, b=(E.loc[lab, "結果"] == "突破"))
+    midt = Lb["time"].quantile(0.5)
+    hr = Lb.groupby("hour").apply(lambda g: pd.Series(dict(
+        筆數=len(g), 突破率=g["b"].mean() * 100,
+        前半突破率=g.loc[g["time"] < midt, "b"].mean() * 100, 後半突破率=g.loc[g["time"] >= midt, "b"].mean() * 100))).reset_index()
+    hr = hr.rename(columns={"hour": "伺服器小時"})
+
+    # 事先定好的時段假設：只看 HYP_BEFORE 以前的事件（提出假設時沒看過）
+    H = E[E["time"] < pd.Timestamp(HYP_BEFORE)]
+    hyp = []
+    for name, sub in (("假設時段 做反轉", H[H["time"].dt.hour.isin(HYP_HOURS)]),
+                      ("其他時段 做反轉（對照）", H[~H["time"].dt.hour.isin(HYP_HOURS)])):
+        lb = sub[sub["結果"].isin(["突破", "反轉"])]
+        for grp, g in (("全部", sub), ("外匯", sub[sub["商品"].map(is_fx)]), ("指數/金屬/能源", sub[~sub["商品"].map(is_fx)])):
+            gl = g[g["結果"].isin(["突破", "反轉"])]
+            row = dict(假設=name, 商品群=grp, 事件數=len(g), 突破率=(gl["結果"] == "突破").mean() * 100 if len(gl) else np.nan)
+            for sl_m, tp_m in [(SL_M, TP_M)] + SLTP_INFO:
+                r, r0 = g[f"R_反轉_{sl_m}_{tp_m}"].dropna(), g[f"R0_反轉_{sl_m}_{tp_m}"].dropna()
+                n_, mu, tt = stat(r)
+                row[f"SL{sl_m}/TP{tp_m} 平均R"] = mu
+                row[f"SL{sl_m}/TP{tp_m} t"] = tt
+                row[f"SL{sl_m}/TP{tp_m} 不含成本R"] = r0.mean() if len(r0) else np.nan
+            hyp.append(row)
+        del lb
+    HY = pd.DataFrame(hyp)
     U, b_is, b_oos = univariate(E, cut)
     lvl = E[lab].groupby(["關卡"]).agg(筆數=("結果", "size"), 突破率=("結果", lambda x: (x == "突破").mean() * 100)).reset_index()
     per_sym = []
@@ -374,12 +406,15 @@ def main():
              f"模型判斷力 AUC = {A_:.3f}（0.5 = 跟猜的一樣；0.55 以上才算有用；0.6 以上算不錯）。",
              f"交易（事先定好）：P≥{P_HI:.2f} 追突破、P≤{P_LO:.2f} 做反轉；SL {SL_M} / TP {TP_M} H1 ATR；最多 4 小時；同商品一次一筆；扣點差與手續費。",
              "『不含成本平均R』= 同樣交易但不扣點差與手續費 → 指標本身的優勢；『成本R』= 每筆被成本吃掉多少。",
+             f"『時段假設檢驗』：事先定好 —— 伺服器 {HYP_HOURS} 點碰關卡做反轉；只用 {HYP_BEFORE} 以前的事件（提出假設時沒看過）。突破率 < 50% 且『不含成本R』> 成本才有交易價值。",
              "判定 ✅：模型交易 ≥100 筆、平均R>0、t≥2、前後半都賺。『全部追突破 / 全部做反轉』是對照組。",
              "『指標狀態 vs 突破率』：每個指標分 5 段，看哪一段突破率明顯偏高/偏低；前 70%（z≥3）與後 30%（z≥2）都顯著且同方向才標 ✅（同時段多條關卡事件相關，門檻從嚴）。"]
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         pd.DataFrame({"說明": notes}).to_excel(xw, sheet_name="說明", index=False)
         S.round(3).to_excel(xw, sheet_name="總結", index=False)
         pd.DataFrame(cal).round(1).to_excel(xw, sheet_name="模型準不準", index=False)
+        HY.round(3).to_excel(xw, sheet_name="時段假設檢驗", index=False)
+        hr.round(1).to_excel(xw, sheet_name="各時段突破率", index=False)
         U.round(2).to_excel(xw, sheet_name="指標狀態vs突破率", index=False)
         lvl.round(1).sort_values("突破率").to_excel(xw, sheet_name="各關卡突破率", index=False)
         pd.DataFrame(per_sym).round(3).to_excel(xw, sheet_name="各商品", index=False)
@@ -404,6 +439,11 @@ def main():
     for r in strat:
         print(f"  {r['做法']}｜{r['商品群']}: {r['筆數']} 筆  平均 {r['平均R']:+.3f}R  不含成本 {r['不含成本平均R']:+.3f}R  "
               f"t={r['t值'] if r['t值'] == r['t值'] else 0:.2f}  → {r['判定']}")
+    print(f"\n  時段假設（伺服器 {HYP_HOURS} 點做反轉，只看 {HYP_BEFORE} 以前的事件）：")
+    for r in hyp:
+        print(f"    {r['假設']}｜{r['商品群']}: {r['事件數']} 筆  突破率 {r['突破率']:.1f}%  "
+              f"SL{SL_M}/TP{TP_M}: 平均 {r[f'SL{SL_M}/TP{TP_M} 平均R']:+.3f}R  不含成本 {r[f'SL{SL_M}/TP{TP_M} 不含成本R']:+.3f}R  "
+              f"｜SL1.0/TP1.5: 平均 {r['SL1.0/TP1.5 平均R']:+.3f}R  不含成本 {r['SL1.0/TP1.5 不含成本R']:+.3f}R")
     st = U[U["判定"].str.startswith("✅")]
     print(f"  穩定的指標狀態：{len(st)} 個")
     for _, r in st.head(12).iterrows():
