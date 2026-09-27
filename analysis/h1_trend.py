@@ -2,10 +2,10 @@
 H1 順勢（規則單純化）—— 小時線趨勢方向 + M5 進場
 
 H1 趨勢（只用已收盤的 H1 K 線）：
-  多頭 = 收盤 > EMA20 且 EMA20 > EMA50 且 EMA50 比 5 根前高；空頭反之；其他 = 無趨勢（不做）
+  多頭 = 收盤 > EMA16 且 EMA16 > EMA64 且 EMA64 比 5 根前高（你的設定；--fast/--slow 可改）；空頭反之；其他 = 無趨勢（不做）
 事先定好的 3 種做法（參數不優化）：
   A 趨勢持有：H1 轉為多頭/空頭時下一根進場，趨勢結束才出場；安全停損 2 H1 ATR
-  B 順勢回檔：H1 多頭時，M5 回檔碰到 M5 EMA20 後收回其上且為陽線 → 做多（空頭反之）；
+  B 順勢回檔：H1 多頭時，M5 回檔碰到 M5 EMA16 後收回其上（--pullback-ema 可改）且為陽線 → 做多（空頭反之）；
      停損 = 最近 6 根 M5 低點外 0.1 H1 ATR（至少 0.3、至多 1.5 H1 ATR）；停利 2R；H1 趨勢結束也出場
   C 順勢回檔、讓利潤跑：進場與停損同 B，不設停利，H1 趨勢結束才出場
 對照：B 的進場點改成「逆 H1 方向」做 —— 若 H1 方向真的有用，順勢應明顯好於逆勢
@@ -32,13 +32,14 @@ from levels_study import is_fx                # noqa: E402
 import optimize_wf as ow                      # noqa: E402
 
 RISK_PCT = 0.5
+FAST, SLOW, PULL = 16, 64, 16          # 由 --fast / --slow / --pullback-ema 設定
 VARIANTS = ["A 趨勢持有", "B 順勢回檔 停利2R", "C 順勢回檔 讓利潤跑", "對照：B 逆勢做"]
 
 
 def h1_state(m1, m5_time):
     h1 = ow.resample(m1, 60)
     c = h1["close"].to_numpy(float)
-    e20, e50 = ema(c, 20), ema(c, 50)
+    e20, e50 = ema(c, FAST), ema(c, SLOW)
     a = atr(h1["high"].to_numpy(float), h1["low"].to_numpy(float), c, 14)
     e50_5 = np.r_[np.full(5, np.nan), e50[:-5]]
     st = np.where((c > e20) & (e20 > e50) & (e50 > e50_5), 1, np.where((c < e20) & (e20 < e50) & (e50 < e50_5), -1, 0))
@@ -113,7 +114,7 @@ def run_symbol(sym, m1, meta, commission):
     comm_px = commission / contract * (1.0 if sym.endswith("USD") else np.nanmedian(c)) if is_fx(sym) and commission else 0.0
     st, A = h1_state(m1, df["time"])
     nxt = next_change(st)
-    e20 = ema(c, 20)
+    e20 = ema(c, PULL)
 
     # A：趨勢開始
     on = np.flatnonzero((st != 0) & (np.r_[0, st[:-1]] != st))
@@ -184,8 +185,13 @@ def main():
     ap.add_argument("--years", type=float, default=2.0)
     ap.add_argument("--to", default=None)
     ap.add_argument("--commission", type=float, default=5.0)
+    ap.add_argument("--fast", type=int, default=16, help="H1 快 EMA（預設 16）")
+    ap.add_argument("--slow", type=int, default=64, help="H1 慢 EMA（預設 64）")
+    ap.add_argument("--pullback-ema", type=int, default=16, help="M5 回檔參考 EMA（預設 16）")
     args = ap.parse_args()
 
+    global FAST, SLOW, PULL
+    FAST, SLOW, PULL = args.fast, args.slow, args.pullback_ema
     from mt5data import fetch_m1
     end = dt.datetime.fromisoformat(args.to) if args.to else dt.datetime.combine(dt.date.today(), dt.time())
     start = end - dt.timedelta(days=round(args.years * 365.25))
@@ -235,11 +241,11 @@ def main():
 
     updated = dt.datetime.now().replace(microsecond=0)
     os.makedirs(args.out, exist_ok=True)
-    path = os.path.join(args.out, f"H1順勢_{updated:%Y%m%d_%H%M}.xlsx")
+    path = os.path.join(args.out, f"H1順勢_EMA{FAST}-{SLOW}_{updated:%Y%m%d_%H%M}.xlsx")
     notes = [f"產生時間 {updated}；期間 {start.date()} ~ {end.date()}；商品 {T['商品'].nunique()} 個",
-             "H1 趨勢：收盤 > EMA20 > EMA50 且 EMA50 上升 = 多頭；反之空頭；其餘不做。只用已收盤 H1。",
+             f"H1 趨勢：收盤 > EMA{FAST} > EMA{SLOW} 且 EMA{SLOW} 比 5 根前高 = 多頭；反之空頭；其餘不做。只用已收盤 H1。",
              "A 趨勢持有：趨勢開始進場、結束出場，安全停損 2 H1 ATR。",
-             "B 順勢回檔：H1 多頭中 M5 回檔碰 EMA20 後收回其上的陽線 → 下一根開盤做多（空頭反之）；停損最近 6 根低點外、停利 2R；H1 趨勢結束也出場。",
+             f"B 順勢回檔：H1 多頭中 M5 回檔碰 EMA{PULL} 後收回其上的陽線 → 下一根開盤做多（空頭反之）；停損最近 6 根低點外、停利 2R；H1 趨勢結束也出場。",
              "C：同 B 但不設停利，H1 趨勢結束才出場。對照：B 的進場點反向做（逆 H1 方向）。",
              "成本：點差 + 外匯手續費 $5/手；『不含成本平均R』看規則本身。1R = 停損距離。",
              "判定 ✅：≥100 筆、平均R>0、t≥2、前後半都賺、≥60% 商品獲利。參數全部事先定好、沒有優化。",
