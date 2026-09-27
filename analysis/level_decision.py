@@ -58,7 +58,10 @@ def h1_series(m1, m5_time):
     sh_ser.iloc[conf_h[conf_h < len(h1)]] = H[hi_p[conf_h < len(h1)]]
     sl_ser.iloc[conf_l[conf_l < len(h1)]] = Lw[lo_p[conf_l < len(h1)]]
     T = pd.DataFrame({"t": close_t, "atr": a, "sw_h": sh_ser.ffill().to_numpy(), "sw_l": sl_ser.ffill().to_numpy()})
-    m = pd.merge_asof(pd.DataFrame({"t": m5_time}), T, on="t", direction="backward")
+    # MT5 資料的時間可能是秒精度、重取樣後是微秒精度，合併前統一成 ns
+    T["t"] = pd.to_datetime(T["t"]).astype("datetime64[ns]")
+    left = pd.DataFrame({"t": pd.to_datetime(pd.Series(m5_time)).astype("datetime64[ns]").to_numpy()})
+    m = pd.merge_asof(left, T, on="t", direction="backward")
     return m["atr"].to_numpy(float), m["sw_h"].to_numpy(float), m["sw_l"].to_numpy(float)
 
 
