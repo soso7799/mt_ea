@@ -176,6 +176,9 @@ def build_events(sym, m1, meta, commission):
             if (sl_m, tp_m) == (SL_M, TP_M):
                 E[f"e_{mode}"] = e
                 E[f"x_{mode}"] = x
+                # 不含成本（無點差、無手續費）—— 看指標本身有沒有優勢
+                _, _, _, R0 = ow.exits(i.copy(), d.copy(), o, h, l, c, np.zeros(n), Aarr, sl_m, tp_m, 0.0)
+                E[f"R0_{mode}"] = R0
     return E
 
 
@@ -228,8 +231,8 @@ def pick_trades(E, which):
             if e_ < 0 or np.isnan(R) or e_ <= busy:
                 continue
             busy = x_
-            out.append((r["time"], s, mode, R))
-    return pd.DataFrame(out, columns=["time", "商品", "做法", "R"])
+            out.append((r["time"], s, mode, R, r[f"R0_{mode}"]))
+    return pd.DataFrame(out, columns=["time", "商品", "做法", "R", "R0"])
 
 
 def stat(R):
@@ -250,7 +253,7 @@ def univariate(E, cut):
         x = lab[f]
         if x.nunique() <= 3:
             bins = sorted(x.dropna().unique())
-            lab_b = x.map(lambda v: f"={v:g}")
+            lab_b = x.map(lambda v: f"值 {v:g}")      # 不可用 "=" 開頭，Excel 會當成公式
         else:
             q = np.nanquantile(x[lab["time"] < cut], [0.2, 0.4, 0.6, 0.8])
             q = np.unique(q)
@@ -277,11 +280,14 @@ def main():
     ap.add_argument("--years", type=float, default=1.0)
     ap.add_argument("--to", default=None)
     ap.add_argument("--commission", type=float, default=5.0)
+    ap.add_argument("--skip-hours", default="23,0,1",
+                    help="略過的伺服器小時（預設 23,0,1：換日點差暴增、量極少；空字串 = 不略過）")
     args = ap.parse_args()
 
     from mt5data import fetch_m1
     end = dt.datetime.fromisoformat(args.to) if args.to else dt.datetime.combine(dt.date.today(), dt.time())
     start = end - dt.timedelta(days=round(args.years * 365.25))
+    skip = [int(x) for x in args.skip_hours.split(",") if x.strip() != ""]
     allE = []
     for s in args.symbols:
         try:
@@ -294,6 +300,8 @@ def main():
         if len(m1) < 50000:
             continue
         E = build_events(s, m1, meta, args.commission)
+        if len(E) and skip:
+            E = E[~E["time"].dt.hour.isin(skip)].reset_index(drop=True)
         print(f"  {s}: 觸碰事件 {len(E)}")
         if len(E):
             allE.append(E)
@@ -318,18 +326,24 @@ def main():
     Eo = E[E["time"] >= oos_start] if pd.notna(oos_start) else E.iloc[0:0]
     strat = []
     trades_all = {}
+    fx_mask = Eo["商品"].map(is_fx)
     for which in ("全部追突破", "全部做反轉", "模型"):
-        T = pick_trades(Eo, which)
-        trades_all[which] = T
-        n, mu, tt = stat(T["R"])
-        half = T["time"].quantile(0.5) if len(T) else None
-        h1 = stat(T.loc[T["time"] < half, "R"])[1] if len(T) else np.nan
-        h2 = stat(T.loc[T["time"] >= half, "R"])[1] if len(T) else np.nan
-        pos_sym = (T.groupby("商品")["R"].sum() > 0).mean() * 100 if len(T) else np.nan
-        ok = which == "模型" and n >= 100 and mu > 0 and (tt or 0) >= 2 and h1 > 0 and h2 > 0
-        strat.append(dict(做法=which, 筆數=n, 平均R=mu, t值=tt, 勝率=(T["R"] > 0).mean() * 100 if n else np.nan,
-                          總R=T["R"].sum() if n else 0, 前半平均R=h1, 後半平均R=h2, 獲利商品比例=pos_sym,
-                          判定=("✅ 可用" if ok else ("❌" if which == "模型" else "對照"))))
+        T_all = pick_trades(Eo, which)
+        trades_all[which] = T_all
+        for grp, T in (("全部", T_all), ("外匯", T_all[T_all["商品"].map(is_fx)]),
+                       ("指數/金屬/能源", T_all[~T_all["商品"].map(is_fx)])):
+            n, mu, tt = stat(T["R"])
+            half = T["time"].quantile(0.5) if len(T) else None
+            h1 = stat(T.loc[T["time"] < half, "R"])[1] if len(T) else np.nan
+            h2 = stat(T.loc[T["time"] >= half, "R"])[1] if len(T) else np.nan
+            pos_sym = (T.groupby("商品")["R"].sum() > 0).mean() * 100 if len(T) else np.nan
+            ok = which == "模型" and n >= 100 and mu > 0 and (tt or 0) >= 2 and h1 > 0 and h2 > 0
+            strat.append(dict(做法=which, 商品群=grp, 筆數=n, 平均R=mu, t值=tt,
+                              不含成本平均R=T["R0"].mean() if n else np.nan, 成本R=(T["R0"] - T["R"]).mean() if n else np.nan,
+                              勝率=(T["R"] > 0).mean() * 100 if n else np.nan,
+                              總R=T["R"].sum() if n else 0, 前半平均R=h1, 後半平均R=h2, 獲利商品比例=pos_sym,
+                              判定=("✅ 可用" if ok else ("❌" if which == "模型" else "對照"))))
+    del fx_mask
     S = pd.DataFrame(strat)
     U, b_is, b_oos = univariate(E, cut)
     lvl = E[lab].groupby(["關卡"]).agg(筆數=("結果", "size"), 突破率=("結果", lambda x: (x == "突破").mean() * 100)).reset_index()
@@ -351,6 +365,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     path = os.path.join(args.out, f"關卡突破反轉判斷_{updated:%Y%m%d_%H%M}.xlsx")
     notes = [f"產生時間 {updated}；期間 {start.date()} ~ {end.date()}；M5；商品 {E['商品'].nunique()} 個；觸碰事件 {len(E)}",
+             f"略過伺服器時間 {args.skip_hours or '（無）'} 點的觸碰（換日：點差暴增、量極少，第一次實測時模型的『把握』有 96% 來自這段，無法交易）。",
              "關卡：昨高/低/收、昨亞/歐/美盤高/低/收（伺服器時間 0–9/9–16/16–24）、上週高/低/收、近期壓力/支撐（H1 擺動點）。",
              "結果：下一根開盤起，先往穿越方向走 0.5 H1 ATR = 突破；先往回 0.5 H1 ATR = 反轉；4 小時內都沒有 = 未決。",
              f"整體突破率：前 70% 期間 {b_is:.1%}，後 30% 期間 {b_oos:.1%}（關卡本身偏反轉時會 < 50%）。",
@@ -358,6 +373,7 @@ def main():
              "模型：梯度提升樹，逐月滾動，只用該月之前的事件訓練 → 預測該月；統計全部是沒看過的資料。",
              f"模型判斷力 AUC = {A_:.3f}（0.5 = 跟猜的一樣；0.55 以上才算有用；0.6 以上算不錯）。",
              f"交易（事先定好）：P≥{P_HI:.2f} 追突破、P≤{P_LO:.2f} 做反轉；SL {SL_M} / TP {TP_M} H1 ATR；最多 4 小時；同商品一次一筆；扣點差與手續費。",
+             "『不含成本平均R』= 同樣交易但不扣點差與手續費 → 指標本身的優勢；『成本R』= 每筆被成本吃掉多少。",
              "判定 ✅：模型交易 ≥100 筆、平均R>0、t≥2、前後半都賺。『全部追突破 / 全部做反轉』是對照組。",
              "『指標狀態 vs 突破率』：每個指標分 5 段，看哪一段突破率明顯偏高/偏低；前 70%（z≥3）與後 30%（z≥2）都顯著且同方向才標 ✅（同時段多條關卡事件相關，門檻從嚴）。"]
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
@@ -386,7 +402,8 @@ def main():
     print(f"\n完成：{path}")
     print(f"整體突破率 {b_is:.1%} / {b_oos:.1%}   模型判斷力 AUC = {A_:.3f}（0.5 = 猜）")
     for r in strat:
-        print(f"  {r['做法']}: {r['筆數']} 筆  平均 {r['平均R']:+.3f}R  t={r['t值'] if r['t值'] == r['t值'] else 0:.2f}  → {r['判定']}")
+        print(f"  {r['做法']}｜{r['商品群']}: {r['筆數']} 筆  平均 {r['平均R']:+.3f}R  不含成本 {r['不含成本平均R']:+.3f}R  "
+              f"t={r['t值'] if r['t值'] == r['t值'] else 0:.2f}  → {r['判定']}")
     st = U[U["判定"].str.startswith("✅")]
     print(f"  穩定的指標狀態：{len(st)} 個")
     for _, r in st.head(12).iterrows():
