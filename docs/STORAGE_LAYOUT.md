@@ -93,6 +93,7 @@ EA 每筆成交（開倉、平倉、SL/TP 觸發、FilterLib 主動平倉）都�
 
 - **用 UNC 路徑，不要用磁碟代號建連結**：代號是每個登入工作階段各自對應的，
   以系統管理員身分執行的 cmd 看不到一般使用者對應的 `H:`/`P:`，排程或服務也看不到。
+- 歷史資料碟若是 Google 雲端硬碟（磁碟根目錄不能建資料夾），`setup_drives.bat` / `train_ml.bat` 會自動改用可寫入的子資料夾（例如 `H:\我的雲端硬碟`）。
 - 建立 symlink 需要系統管理員權限（或 Windows「開發人員模式」）。
 - 確認允許本機→遠端連結：`fsutil behavior query SymlinkEvaluation`，`L2R` 需為啟用。
 - NAS 開啟快照 / 資源回收筒，至少保護 `H:\trade_logs` 與 `P:\src`。

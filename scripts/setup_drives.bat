@@ -16,12 +16,7 @@ for %%I in ("%~dp0..\..\..") do set "PROG_ROOT=%%~fI"
 REM LINK_BASES=1 moves MT5 "bases" to the history drive (slower backtests)
 set "LINK_BASES=0"
 
-if not exist "%DATA_ROOT%\" (
-  echo [ERROR] Cannot see history drive %DATA_ROOT%
-  echo As Administrator, mapped drive letters may be hidden.
-  echo Set DATA_ROOT to the network path, e.g. \\server\share
-  exit /b 1
-)
+call "%~dp0find_data_root.bat" %DATA_ROOT% || exit /b 1
 
 call "%~dp0find_mt5.bat" %1 || exit /b 1
 echo History drive: %DATA_ROOT%
@@ -38,27 +33,16 @@ for %%D in (src releases releases\models presets scripts terminals) do (
 )
 
 echo === Link MQL5\Files\trade_logs (trade log CSV) ===
-if exist "%MT5_DATA%\MQL5\Files\trade_logs" (
-  echo Already exists, skipped
-) else (
-  mklink /D "%MT5_DATA%\MQL5\Files\trade_logs" "%DATA_ROOT%\trade_logs" || exit /b 1
-)
+call :link "%MT5_DATA%\MQL5\Files\trade_logs" "%DATA_ROOT%\trade_logs" || exit /b 1
 
-echo === Link Common\Files\mt_ea_ml (ML training data) ===
 set "COMMON_FILES=%APPDATA%\MetaQuotes\Terminal\Common\Files"
 if not exist "%COMMON_FILES%" mkdir "%COMMON_FILES%"
-if exist "%COMMON_FILES%\mt_ea_ml" (
-  echo Already exists, skipped
-) else (
-  mklink /D "%COMMON_FILES%\mt_ea_ml" "%DATA_ROOT%\ml\features" || exit /b 1
-)
+
+echo === Link Common\Files\mt_ea_ml (ML training data) ===
+call :link "%COMMON_FILES%\mt_ea_ml" "%DATA_ROOT%\ml\features" || exit /b 1
 
 echo === Link Common\Files\mt_ea_models (ML models) ===
-if exist "%COMMON_FILES%\mt_ea_models" (
-  echo Already exists, skipped
-) else (
-  mklink /D "%COMMON_FILES%\mt_ea_models" "%PROG_ROOT%\releases\models" || exit /b 1
-)
+call :link "%COMMON_FILES%\mt_ea_models" "%PROG_ROOT%\releases\models" || exit /b 1
 
 if "%LINK_BASES%"=="1" (
   echo === Move bases to history drive ^(close MT5 first^) ===
@@ -74,3 +58,18 @@ if "%LINK_BASES%"=="1" (
 
 echo Done.
 endlocal
+exit /b 0
+
+REM ---- :link <link> <target>  -> (re)create a directory symlink.
+REM      An existing link is removed first (rmdir on a link never touches
+REM      the target), so a broken or outdated link gets fixed.
+:link
+if exist "%~1" (
+  rmdir "%~1" 2>nul || (
+    echo [ERROR] %~1 is a folder with files, not a link.
+    echo Move its files to %~2, delete the folder, then run again.
+    exit /b 1
+  )
+)
+mklink /D "%~1" "%~2"
+exit /b %errorlevel%

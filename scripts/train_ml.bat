@@ -13,6 +13,8 @@ set "DATA_ROOT=H:"
 for %%I in ("%~dp0..\..\..") do set "PROG_ROOT=%%~fI"
 set "ML_DIR=%~dp0..\ml"
 
+call "%~dp0find_data_root.bat" %DATA_ROOT% || exit /b 1
+
 where python >nul 2>nul || (
   echo [ERROR] python not found. Install Python 3.10+ and tick
   echo "Add python.exe to PATH" during setup.
