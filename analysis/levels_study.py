@@ -33,7 +33,24 @@ from data import TF_MIN, fetch_all                      # noqa: E402
 from indicators import adx, atr, cci, ema, rsi, stoch, tai   # noqa: E402
 from levels import server_to_utc                        # noqa: E402
 
-SESS = [("亞", 0, 7), ("歐", 7, 13), ("美", 13, 21)]
+# 時段定義：預設與 YesterdayHiL_Autoadjust 指標相同（MT5 伺服器時間 亞 0–9、歐 9–16、美 16–24）；
+# --sessions utc 則改用 UTC 亞 00–07、歐 07–13、美 13–21
+SESS_SERVER = [("亞", 0, 9), ("歐", 9, 16), ("美", 16, 24)]
+SESS_UTC = [("亞", 0, 7), ("歐", 7, 13), ("美", 13, 21)]
+SESS = SESS_SERVER
+SESSION_MODE = "server"
+
+
+def set_sessions(mode):
+    global SESS, SESSION_MODE
+    SESSION_MODE = mode
+    SESS[:] = SESS_SERVER if mode == "server" else SESS_UTC
+
+
+def session_hours(times):
+    """回傳用來劃分時段的小時（伺服器時間或 UTC）。"""
+    t = pd.DatetimeIndex(times)
+    return (t.hour if SESSION_MODE == "server" else server_to_utc(t).hour).to_numpy()
 LEVEL_NAMES = (["昨高", "昨低", "昨收"] +
                [f"昨{s}{k}" for s, _, _ in SESS for k in ("高", "低", "收")] +
                ["上週高", "上週低", "上週收"])
@@ -72,8 +89,7 @@ def find_events(sym, df, cost_price, N):
     o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
     tv = df["tick_volume"].to_numpy(float)
     n = len(c)
-    utc = server_to_utc(df["time"])
-    uh = utc.hour.to_numpy()
+    uh = session_hours(df["time"])
     lv, day = daily_levels(df, uh)
     a14 = atr(h, l, c, 14)
     r14 = rsi(c, 14)
@@ -257,8 +273,7 @@ def search_rules(E, cut):
 def today_levels(sym, df, E, digits):
     """今天（最後一個交易日）的關卡清單、距現價、歷史突破/反轉率。"""
     o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
-    utc = server_to_utc(df["time"])
-    lv, _ = daily_levels(df, utc.hour.to_numpy())
+    lv, _ = daily_levels(df, session_hours(df["time"]))
     a14 = atr(h, l, c, 14)[-1]
     px = c[-1]
     base = E.groupby("level")["result"].agg(lambda s: ((s == "突破").sum(), (s == "反轉").sum()))
@@ -287,7 +302,10 @@ def main():
     ap.add_argument("--tf", default="M15", choices=["M5", "M15", "H1"], help="用哪個週期偵測觸碰（預設 M15）")
     ap.add_argument("--hours", type=float, default=3, help="觸碰後觀察幾小時判斷突破/反轉（預設 3）")
     ap.add_argument("--commission", type=float, default=5.0, help="外匯每手來回手續費 USD（FTMO 預設 5）")
+    ap.add_argument("--sessions", choices=["server", "utc"], default="server",
+                    help="時段定義：server = 與 YesterdayHiL 指標相同（伺服器時間 亞0-9/歐9-16/美16-24，預設）；utc = UTC 亞0-7/歐7-13/美13-21")
     args = ap.parse_args()
+    set_sessions(args.sessions)
 
     frames, metas = fetch_all(args.symbols, args.cache, args.terminal, offline=args.offline, max_age_min=24 * 60)
     syms = [s for s in args.symbols if (s, args.tf) in frames]
@@ -347,7 +365,9 @@ def main():
     notes = [
         f"產生時間 {updated}；週期 {args.tf}；觸碰後觀察 {args.hours} 小時（{N} 根）；商品：{', '.join(syms)}",
         f"期間 {E['time'].min()} ~ {E['time'].max()}；前 70% / 後 30% 分界 {cut}",
-        "關卡：昨日高/低/收；昨日亞盤(UTC00-07)、歐盤(07-13)、美盤(13-21)的高/低/收；上週高/低/收。每天用前一日資料算好後使用。",
+        "關卡：昨日高/低/收；昨日亞盤、歐盤、美盤的高/低/收；上週高/低/收。每天用前一日資料算好後使用。"
+        + ("時段 = 伺服器時間 亞 0-9、歐 9-16、美 16-24（同 YesterdayHiL 指標）。" if args.sessions == "server"
+           else "時段 = UTC 亞 00-07、歐 07-13、美 13-21。"),
         f"觸碰：前一根收盤距關卡 >{TOL} ATR，本根高低點碰到關卡 ±{TOL} ATR；每條關卡每天只記第一次。",
         f"突破 / 反轉：以觸碰 K 線的下一根開盤為基準，先往穿越方向走 {BREAK_ATR} ATR = 突破，先往回走 {BREAK_ATR} ATR = 反轉。"
         "z 值 ≥2 偏突破、≤-2 偏反轉（相對 50/50）。",

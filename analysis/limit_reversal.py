@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "ml"))
 from build_report import DEFAULT_SYMBOLS               # noqa: E402
 from indicators import atr                             # noqa: E402
 from levels import server_to_utc                       # noqa: E402
-from levels_study import daily_levels, is_fx           # noqa: E402
+from levels_study import daily_levels, is_fx, session_hours, set_sessions   # noqa: E402
 
 LEVELS = ["昨高", "昨低", "昨亞高", "昨亞低", "昨歐高", "昨歐低", "昨美高", "昨美低"]
 SL_ATR, TP_ATR, TOL, HOLD_H, VOL_TH = 0.3, 1.0, 0.1, 24, 0.8
@@ -61,7 +61,7 @@ def run_symbol(sym, m1, point, contract, commission, atr_rule):
     A = higher_tf_atr(m1, atr_rule)
     volr = m15_volume_ratio(m1)
     n = len(c)
-    lv, day = daily_levels(m1, server_to_utc(t).hour.to_numpy())
+    lv, day = daily_levels(m1, session_hours(t))
     hold = HOLD_H * 60
     day_start = np.r_[0, np.flatnonzero(day[1:] != day[:-1]) + 1]
     day_end = np.r_[day_start[1:], n]
@@ -132,7 +132,10 @@ def main():
     ap.add_argument("--to", default=None, help="結束日期 YYYY-MM-DD（預設今天）")
     ap.add_argument("--atr-tf", default="1h", choices=["15min", "1h", "4h"], help="停損停利用哪個週期的 ATR（預設 1h）")
     ap.add_argument("--commission", type=float, default=5.0)
+    ap.add_argument("--sessions", choices=["server", "utc"], default="server",
+                    help="時段定義：server = 同 YesterdayHiL 指標（預設）；utc = UTC")
     args = ap.parse_args()
+    set_sessions(args.sessions)
 
     from mt5data import fetch_m1
     end = dt.datetime.fromisoformat(args.to) if args.to else dt.datetime.combine(dt.date.today(), dt.time())
