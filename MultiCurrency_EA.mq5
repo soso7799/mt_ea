@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //  MultiCurrency_EA.mq5  v5.3
-//  v5.3：修正 GetOneSignal 指標陣列時間順序（[0] 改為最近收盤K）
+//  v5.3：修正 GetOneSignal 指標陣列時間順序（[0] 改為最近收盤K）；
+//        MACD 柱狀體改用 主線-訊號線（iMACD 沒有緩衝區 2，舊版 MACD 從未觸發）
 //  7幣別平等競爭，ATR動能排序
 //  5個指標全部同向 → 訂單上限由FilterLib控制
 //  風控全部由 FilterLib_v5.mqh 處理
@@ -404,11 +405,15 @@ if(indType==2)
    // ================= MACD =================
 if(indType==3)
 {
-   double macd[],signal[],hist[];
+   // iMACD 只有 0=主線、1=訊號線兩個緩衝區；舊版讀不存在的緩衝區 2 一律失敗，
+   // MACD 從未產生信號。舊版模式保留這個行為以便比較。
+   if(Inp_LegacySignalOrder) return 0;
+
+   double macd[],signal[],hist[3];
 
    if(!ReadBuf(H[si].macd,0,3,macd))   return 0;
    if(!ReadBuf(H[si].macd,1,3,signal)) return 0;
-   if(!ReadBuf(H[si].macd,2,3,hist))   return 0;
+   for(int k=0;k<3;k++) hist[k]=macd[k]-signal[k];   // 柱狀體 = 主線 - 訊號線
 
    double m0=macd[0];
    double m1=macd[1];
@@ -646,14 +651,14 @@ bool BuildMLFeatures(int si,int sig,int buyScore,int sellScore,
                      const int &s[],datetime barTime,double &f[])
 {
    string sym=symbols[si];
-   double atr[],ef[],es[],rsi[],bbM[],bbU[],bbL[],macd[],hist[],k[],d[];
+   double atr[],ef[],es[],rsi[],bbM[],bbU[],bbL[],macd[],msig[],k[],d[];
 
    if(mlAtr[si]==INVALID_HANDLE || !CopySeries(mlAtr[si],0,1,atr) || atr[0]<=0) return false;
    if(!CopySeries(H[si].ef,0,2,ef) || !CopySeries(H[si].es,0,1,es))           return false;
    if(!CopySeries(H[si].rsi,0,2,rsi))                                         return false;
    if(!CopySeries(H[si].bb,0,1,bbM) || !CopySeries(H[si].bb,1,2,bbU) ||
       !CopySeries(H[si].bb,2,2,bbL))                                          return false;
-   if(!CopySeries(H[si].macd,0,1,macd) || !CopySeries(H[si].macd,2,2,hist))   return false;
+   if(!CopySeries(H[si].macd,0,2,macd) || !CopySeries(H[si].macd,1,2,msig))   return false;
    if(!CopySeries(H[si].stoch,MAIN_LINE,1,k) ||
       !CopySeries(H[si].stoch,SIGNAL_LINE,1,d))                               return false;
 
@@ -664,6 +669,8 @@ bool BuildMLFeatures(int si,int sig,int buyScore,int sellScore,
    double pip   = (dgt==2||dgt==3)?0.01:0.0001;
    double bw0   = bbU[0]-bbL[0];
    double bw1   = bbU[1]-bbL[1];
+   double hist0 = macd[0]-msig[0];                  // MACD 柱狀體 = 主線 - 訊號線
+   double hist1 = macd[1]-msig[1];
    MqlDateTime t; TimeToStruct(barTime,t);
    double hr    = 2.0*M_PI*t.hour/24.0;
 
@@ -684,8 +691,8 @@ bool BuildMLFeatures(int si,int sig,int buyScore,int sellScore,
    f[n++]=bw0/a;
    f[n++]=(bw1>0 ? bw0/bw1 : 1.0);
    f[n++]=macd[0]/a*dir;
-   f[n++]=hist[0]/a*dir;
-   f[n++]=(hist[0]-hist[1])/a*dir;
+   f[n++]=hist0/a*dir;
+   f[n++]=(hist0-hist1)/a*dir;
    f[n++]=(k[0]-50.0)*dir;
    f[n++]=(d[0]-50.0)*dir;
    f[n++]=MathSin(hr);
