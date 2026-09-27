@@ -18,6 +18,8 @@
 
 ## 操作步驟
 
+> 也可以改用 Python 回測產生同格式的資料，速度快很多，見 [BACKTEST_PY.md](BACKTEST_PY.md)。
+
 1. 部署：執行 `scripts\deploy.bat`（會一併複製 `MLRecorder.mqh`），MetaEditor 按 F7 編譯。
 2. 重新以系統管理員執行一次 `scripts\setup_drives.bat <MT5資料夾ID>`，建立 `mt_ea_ml` 連結
    （已存在的 `trade_logs` 連結會自動略過）。

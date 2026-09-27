@@ -45,7 +45,8 @@ P:\
 │   ├─ TradeLogger.mqh
 │   ├─ MLRecorder.mqh
 │   ├─ MLFilter.mqh
-│   └─ ml\train.py        ← 模型訓練（見 ML_PHASE2_3.md）
+│   ├─ ml\train.py        ← 模型訓練（見 ML_PHASE2_3.md）
+│   └─ ml\backtest.py     ← Python 回測（見 BACKTEST_PY.md）
 ├─ releases\
 │   ├─ v5.2\              ← 編譯好的 MultiCurrency_EA.ex5 + 發布說明
 │   └─ models\            ← 訓練好的 .onnx 模型

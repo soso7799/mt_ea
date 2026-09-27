@@ -3,3 +3,5 @@ pandas
 scikit-learn
 skl2onnx
 onnxruntime
+tzdata
+MetaTrader5; sys_platform == "win32"
