@@ -5,7 +5,7 @@
   只統計每輪「下 TEST 週」的交易（挑參數時沒看過的資料），等於模擬每月重新調參數的真實結果。
 
   觸發（你圖上的指標）：
-    MA 交叉：EMA 快線上穿/下穿慢線（你的兩條 EMA）
+    MA 交叉：EMA 快線（5/8/13/20/26）上穿/下穿慢線（34/50/89/144/200）（你的兩條 EMA）
     KDJ J線：只看 J（你的檔 J=3D-2K，以及標準 J=3K-2D）穿 50、離開 0/100
     MACD柱：EMA 快-慢（MT5 內建 MACD 的柱體，不看訊號線）穿 0、柱體轉折
     趨勢線突破：移植自 Trendline_Signal_Indicator_MT5 v2.10（Swing 左右 2/3/5 根）
@@ -142,8 +142,9 @@ def trendline_break(o, h, l, c, tsec, lr=3, depth=400):
 def triggers(o, h, l, c, t=None):
     """回傳 list of (觸發名稱, 參數字串, long_bool, short_bool)。"""
     T = []
-    E = {p: ema(c, p) for p in (5, 8, 13, 21, 34, 55, 89, 144)}
-    for f, s in itertools.product((5, 8, 13, 21), (34, 55, 89, 144)):
+    FAST, SLOW = (5, 8, 13, 20, 26), (34, 50, 89, 144, 200)
+    E = {p: ema(c, p) for p in FAST + SLOW}
+    for f, s in itertools.product(FAST, SLOW):
         T.append(("MA交叉", f"EMA{f}/{s}", cross_up(E[f], E[s]), cross_up(E[s], E[f])))
     for f, s, g in ((5, 35, 5), (12, 26, 9), (8, 21, 5), (5, 20, 3), (10, 40, 7)):
         v, sg = macd_hull(c, f, s, g)
@@ -370,7 +371,7 @@ def main():
             # 你目前的設定：整段期間、前半/後半（順訊號、無濾網、SL1/TP2）
             for cb in combos:
                 key = {"MACD Hull": cb["參數"] == "5/35/5", "KDJ": cb["參數"] in ("9/3/3 區間20/80", "9/3/3 K穿50"),
-                       "TAI": cb["參數"] == "MA28/週期5", "趨勢線突破": cb["參數"] == "Swing3",
+                       "TAI": cb["參數"] == "MA28/週期5", "MA交叉": cb["參數"] == "EMA20/50", "趨勢線突破": cb["參數"] == "Swing3",
                        "KDJ J線": cb["參數"].startswith("9/3/3 J=3D-2K"),
                        "MACD柱": cb["參數"].startswith("12/26 ")}.get(cb["觸發"], False)
                 if key and cb["濾網"] == "無濾網" and cb["SL"] == 1.0 and cb["TP"] == 2.0:
@@ -395,7 +396,7 @@ def main():
              "成交：下一根開盤；買在 Ask、賣在 Bid；同根碰到 SL 與 TP 算 SL。成本：逐根點差 + 外匯手續費。1R = 停損距離。",
              "判定 ✅ 可用：滾動測試 ≥30 筆、平均R>0、t≥2、≥60% 的輪數獲利。",
              "『目前建議』= 用最近 12 週選出的組合（下個月要用的參數）；若該商品判定 ❌，建議參數也不可靠。",
-             "『你目前的設定』= MACD Hull 5/35/5、KDJ 9/3/3、TAI MA28/週期5、趨勢線 Swing3、KDJ J線 9/3/3、MACD柱 12/26，順訊號與反向做，無濾網、SL1/TP2，整段期間與前後半。",
+             "『你目前的設定』= MACD Hull 5/35/5、KDJ 9/3/3、TAI MA28/週期5、EMA20/50、趨勢線 Swing3、KDJ J線 9/3/3、MACD柱 12/26，順訊號與反向做，無濾網、SL1/TP2，整段期間與前後半。",
              f"注意：同時檢驗 {len(S)} 個商品×週期，即使完全隨機也可能有 1–2 個碰巧 ✅。"]
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         pd.DataFrame({"說明": notes}).to_excel(xw, sheet_name="說明", index=False)
