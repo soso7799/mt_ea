@@ -192,3 +192,19 @@ G:\我的雲端硬碟\src\mt_ea\scripts\h1_trend.bat            （近 2 年）
   C 同 B 不設停利、趨勢結束才出；對照 = B 逆勢做
 - 扣點差與手續費；分頁：總結（含每筆 0.5% 風險的 FTMO 回撤試算）、各商品、每月R、出場原因、交易明細
 - 驗證：隨機資料三種都 ❌；有持續趨勢的模擬資料 B ✅、逆勢對照大虧
+
+## 全面探勘：任何指標 × 所有商品（mine_all.bat）
+
+```
+G:\我的雲端硬碟\src\mt_ea\scripts\mine_all.bat                      （近 2 年，M15/H1/H4）
+G:\我的雲端硬碟\src\mt_ea\scripts\mine_all.bat --years 3             （第一次會從 MT5 補下載第 3 年）
+G:\我的雲端硬碟\src\mt_ea\scripts\mine_all.bat --symbols EURUSD XAUUSD US100.cash
+```
+
+- 商品：預設 = `export\bars` 快取裡的所有商品 + MT5「市場報價」視窗中顯示的所有商品（新商品第一次會下載 M1）
+- 約 150 種訊號：EMA、MACD、RSI、Stochastic、CCI、Williams %R、布林、Keltner、Donchian、ADX/DI、動量、SAR、SuperTrend、一目、Aroon、
+  平均K、吞噬、Pin bar、內包線、連續漲跌、爆量長K、你的 MACD Hull / KDJ / J 線 / MACD 柱 / TAI / 趨勢線
+- × 濾網（無 / EMA200 同側）× 順 / 反 × 4 種 SL/TP；扣點差與手續費
+- 三段式：探勘（前 50%）→ 驗證（25%）→ 期末考（最後 25%，只公布一次）；另跑 3 次「方向隨機翻轉」估計純運氣通過數
+- 分頁：運氣對照、跨商品通用規則、單商品規則、各家族最佳（看過度擬合的退化）
+- 驗證：隨機資料 0 個通過；含均值回歸的模擬商品，找出的全是該商品的反向（回歸）規則
