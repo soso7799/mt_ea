@@ -7,7 +7,7 @@
   觸發（你圖上的指標）：
     MA 交叉：EMA 快線上穿/下穿慢線
     MACD Hull：主線上穿/下穿訊號線（移植自 Macd Hull.mq5，mladen）
-    KDJ：K 上穿 D 且 K < 下限（做多）/ K 下穿 D 且 K > 上限（做空）
+    KDJ（移植自 KDJ_Averages.mq5，SMA 平滑）：K 上穿 D 且 K < 下限（做多）/ K 下穿 D 且 K > 上限（做空）；或 K 穿越 50 線
     TAI：由非多頭轉多頭動能（做多）/ 轉空頭動能（做空）（移植自 TAI_Color_Panel_Optimized.mq5）
   每個觸發 × 濾網（無 / 價格在 EMA50 同側且 EMA50 同向 / EMA100 同上）× 方向（順訊號 / 反向做）
        × 停損停利（ATR 倍數 1/1.5、1/2、1.5/3）；最多持有 48 根；同一組合一次只持有一筆
@@ -68,13 +68,16 @@ def macd_hull(c, f, s, g):
     return v, sig
 
 
-def kdj(h, l, c, n, m1, m2):
+def kdj(h, l, c, n, mk, md):
+    """移植自 KDJ_Averages.mq5（預設 SMA 平滑）：RSV → K=SMA(RSV,mk) → D=SMA(K,md)；J=3D-2K（該檔寫法）。"""
     ll = pd.Series(l).rolling(n, min_periods=n).min().to_numpy()
     hh = pd.Series(h).rolling(n, min_periods=n).max().to_numpy()
-    rsv = np.where(hh > ll, (c - ll) / (hh - ll) * 100, 50.0)
-    rsv = np.nan_to_num(rsv, nan=50.0)
-    K = pd.Series(rsv).ewm(alpha=1.0 / m1, adjust=False).mean().to_numpy()
-    D = pd.Series(K).ewm(alpha=1.0 / m2, adjust=False).mean().to_numpy()
+    warm = np.isnan(ll) | np.isnan(hh)
+    ll, hh = np.fmin(c, ll), np.fmax(c, hh)
+    rsv = np.where(hh != ll, 100.0 * (c - ll) / np.where(hh != ll, hh - ll, 1.0), 50.0)
+    rsv = np.where(warm, np.nan, rsv)
+    K = pd.Series(rsv).rolling(max(mk, 2), min_periods=max(mk, 2)).mean().to_numpy()
+    D = pd.Series(K).rolling(max(md, 2), min_periods=max(md, 2)).mean().to_numpy()
     return K, D
 
 
@@ -100,6 +103,8 @@ def triggers(o, h, l, c):
         K, D = kdj(h, l, c, n, m, m)
         for lo, hi in ((20, 80), (30, 70)):
             T.append(("KDJ", f"{n}/{m}/{m} 區間{lo}/{hi}", cross_up(K, D) & (K < lo), cross_up(D, K) & (K > hi)))
+        fifty = np.full(len(c), 50.0)
+        T.append(("KDJ", f"{n}/{m}/{m} K穿50", cross_up(K, fifty), cross_up(fifty, K)))
     for ma, tp in itertools.product((14, 21, 28, 50), (5, 8)):
         col = tai(o, h, l, c, ma_period=ma, tai_period=tp)[1]
         T.append(("TAI", f"MA{ma}/週期{tp}", onset(col == 1), onset(col == 2)))
@@ -297,7 +302,7 @@ def main():
                 params.append(dict(商品=s, 週期=tf, 組合=k, 被選到輪數=v))
             # 你目前的設定：整段期間、前半/後半（順訊號、無濾網、SL1/TP2）
             for cb in combos:
-                key = {"MACD Hull": cb["參數"] == "5/35/5", "KDJ": cb["參數"] == "9/3/3 區間20/80",
+                key = {"MACD Hull": cb["參數"] == "5/35/5", "KDJ": cb["參數"] in ("9/3/3 區間20/80", "9/3/3 K穿50"),
                        "TAI": cb["參數"] == "MA28/週期5"}.get(cb["觸發"], False)
                 if key and cb["濾網"] == "無濾網" and cb["SL"] == 1.0 and cb["TP"] == 2.0:
                     mid = df["time"].iloc[len(df) // 2]
@@ -316,7 +321,7 @@ def main():
     notes = [f"產生時間 {updated}；期間 {start.date()} ~ {end.date()}；週期 {', '.join(args.tf)}",
              f"滾動式最佳化：每輪用過去 {TRAIN_W} 週挑參數（交易≥{MIN_TRAIN_N}、平均R>0、t 最高），交易接下來 {TEST_W} 週，再往前推。",
              "『平均R / t值 / 勝率』只統計每輪『下 4 週』的交易 —— 挑參數時沒用到的資料，等於每月重新調參數的真實結果。",
-             "觸發：MA交叉（EMA）、MACD Hull（移植自 Macd Hull.mq5）、KDJ（K/D 交叉 + 區間）、TAI（動能轉色）。",
+             "觸發：MA交叉（EMA）、MACD Hull（移植自 Macd Hull.mq5）、KDJ（KDJ_Averages.mq5，K/D 交叉 + 區間，或 K 穿 50）、TAI（動能轉色）。",
              "每個觸發 × 濾網（無 / EMA50 趨勢 / EMA100 趨勢）× 方向（順訊號 / 反向做）× SL/TP（1/1.5、1/2、1.5/3 ATR），最多持有 48 根，一次一筆。",
              "成交：下一根開盤；買在 Ask、賣在 Bid；同根碰到 SL 與 TP 算 SL。成本：逐根點差 + 外匯手續費。1R = 停損距離。",
              "判定 ✅ 可用：滾動測試 ≥30 筆、平均R>0、t≥2、≥60% 的輪數獲利。",
