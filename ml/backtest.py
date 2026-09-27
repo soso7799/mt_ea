@@ -602,6 +602,12 @@ def summarize(sim, name):
     i = int(np.argmax(dd))
     res = dict(name=name, deposit=sim.deposit, net=sim.balance - sim.deposit, trades=len(d),
                max_dd=float(dd[i]), max_dd_pct=float(dd[i] / peak[i] * 100) if peak[i] else 0.0)
+    # FTMO 式檢查：相對初始資金的最大虧損、單日最大虧損（以伺服器日計）
+    res["max_loss_pct"] = float((sim.deposit - eq.min()) / sim.deposit * 100)
+    day = pd.Series(eq, index=pd.DatetimeIndex(sim.Tn)).resample("1D").agg(["first", "min"]).dropna()
+    res["worst_day_pct"] = float(((day["first"] - day["min"]) / sim.deposit * 100).max()) if len(day) else 0.0
+    if len(d):
+        res["last_trade"] = str(pd.Timestamp(d["close_time"].max()))
     if len(d):
         gp = d.loc[d.profit > 0, "profit"].sum()
         gl = -d.loc[d.profit <= 0, "profit"].sum()
@@ -616,7 +622,8 @@ def fmt_summary(r):
              f"  淨利          {r['net']:>12,.2f}",
              f"  獲利因子      {r.get('pf', 0):>12.2f}",
              f"  最大回撤      {r['max_dd']:>12,.2f}  ({r['max_dd_pct']:.2f}%)",
-             f"  交易次數      {r['trades']:>12}",
+             f"  交易次數      {r['trades']:>12}   最後一筆 {r.get('last_trade', '-')}",
+             f"  FTMO 檢查     最大虧損 {r['max_loss_pct']:.2f}% (限 10%)  單日最大虧損 {r['worst_day_pct']:.2f}% (限 5%)",
              f"  勝率          {r.get('win', 0):>11.1f}%"]
     if r.get("reasons"):
         lines.append("  平倉原因      " + ", ".join(f"{k}={v}" for k, v in sorted(r["reasons"].items())))
@@ -769,9 +776,17 @@ def main():
     ap.add_argument("--features-out", default=None, help="ML 訓練資料輸出資料夾（例如 H:\\...\\ml\\features）")
     ap.add_argument("--terminal", default=None, help="terminal64.exe 路徑（有多個 MT5 時指定）")
     ap.add_argument("--refresh", action="store_true", help="重新下載 M1 資料")
+    ap.add_argument("--equity-floor", type=float, default=None,
+                    help="覆寫 FilterLib 的淨值下限 AccountEquityFloor（EA 寫死 9600；填 0 = 停用）")
+    ap.add_argument("--day-loss", type=float, default=None,
+                    help="覆寫單日虧損上限 DayLossLimit（EA 寫死 -350；例如 -5000）")
     args = ap.parse_args()
 
     cfg = parse_sources(args.src)
+    if args.equity_floor is not None:
+        cfg["c"]["AccountEquityFloor"] = args.equity_floor
+    if args.day_loss is not None:
+        cfg["c"]["DayLossLimit"] = args.day_loss
     check_feature_names(args.src)
     start = dt.datetime.fromisoformat(args.start)
     end = dt.datetime.fromisoformat(args.end)
@@ -789,7 +804,8 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     modes = ["legacy", "fixed"] if args.mode == "both" else [args.mode]
     report = [f"Python 回測  {args.start} ~ {args.end}  初始資金 {args.deposit:,.0f}  "
-              f"手續費 {args.commission}/手  本機時區 {args.local_tz}", ""]
+              f"手續費 {args.commission}/手  本機時區 {args.local_tz}",
+              f"淨值下限 {cfg['c']['AccountEquityFloor']:,.0f}  單日虧損上限 {cfg['c']['DayLossLimit']:,.0f}", ""]
     for mode in modes:
         name = "A 舊邏輯 (Inp_LegacySignalOrder=true)" if mode == "legacy" else "B 修正後 (v5.3)"
         print(f"\n=== 模擬 {name} ===")
