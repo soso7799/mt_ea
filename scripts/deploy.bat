@@ -15,8 +15,9 @@ copy /Y "%SRC%\TradeLogger.mqh"       "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\MLRecorder.mqh"        "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\MLFilter.mqh"          "%MT5_DATA%\MQL5\Include\" || exit /b 1
 copy /Y "%SRC%\MultiCurrency_EA.mq5"  "%MT5_DATA%\MQL5\Experts\" || exit /b 1
+copy /Y "%SRC%\indicators\KeyLevels.mq5" "%MT5_DATA%\MQL5\Indicators\" || exit /b 1
 
 echo.
-echo Deployed. Open MetaEditor, press F7 to compile MultiCurrency_EA.mq5,
+echo Deployed. Open MetaEditor, press F7 to compile MultiCurrency_EA.mq5 and KeyLevels.mq5,
 echo then copy the .ex5 to releases\^<version^>\
 endlocal
