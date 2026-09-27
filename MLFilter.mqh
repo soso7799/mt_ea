@@ -78,7 +78,7 @@ public:
       matrixf x(1, m_nf);
       for(int i = 0; i < m_nf; i++) x[0][i] = (float)f[i];
 
-      vectorl label(1);
+      long    label[1];        // 模型的 label 輸出（int64），用不到但必須接收
       matrixf prob(1, 2);
       if(!OnnxRun(m_handle, ONNX_NO_CONVERSION, x, label, prob))
       {
