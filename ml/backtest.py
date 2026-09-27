@@ -2,7 +2,9 @@
 MultiCurrency_EA 的 Python 回測（逐分鐘模擬），並同時產生 ML 訓練資料。
 
 用法（Windows，MT5 終端已登入）：
-    python backtest.py --from 2022-01-01 --to 2025-06-30
+    python backtest.py                  # 預設：從今天往前 3 年
+    python backtest.py --years 5        # 往前 5 年
+    python backtest.py --from 2024-01-01 --to 2024-12-31
 
 特點
   * EA 參數、商品、權重、FilterLib 規則（SL/TP/手數/ATR門檻）與風控常數
@@ -761,8 +763,9 @@ def build_ml_rows(sim, s, max_hold_h, m1):
 
 def main():
     ap = argparse.ArgumentParser(description="MultiCurrency_EA Python 回測")
-    ap.add_argument("--from", dest="start", required=True, help="開始日期 YYYY-MM-DD")
-    ap.add_argument("--to", dest="end", required=True, help="結束日期 YYYY-MM-DD")
+    ap.add_argument("--to", dest="end", default=None, help="結束日期 YYYY-MM-DD（預設今天）")
+    ap.add_argument("--years", type=float, default=3, help="從結束日期往前幾年（預設 3）")
+    ap.add_argument("--from", dest="start", default=None, help="開始日期 YYYY-MM-DD（預設 = 結束日期 - years）")
     ap.add_argument("--mode", choices=["both", "fixed", "legacy"], default="both",
                     help="both=舊邏輯與修正後並列（預設）")
     ap.add_argument("--deposit", type=float, default=10000, help="初始資金（預設 10000）")
@@ -788,8 +791,11 @@ def main():
     if args.day_loss is not None:
         cfg["c"]["DayLossLimit"] = args.day_loss
     check_feature_names(args.src)
-    start = dt.datetime.fromisoformat(args.start)
-    end = dt.datetime.fromisoformat(args.end)
+    end = dt.datetime.fromisoformat(args.end) if args.end else \
+        dt.datetime.combine(dt.date.today(), dt.time())
+    start = dt.datetime.fromisoformat(args.start) if args.start else \
+        end - dt.timedelta(days=round(args.years * 365.25))
+    args.start, args.end = start.date().isoformat(), end.date().isoformat()
     warm = start - dt.timedelta(days=20)             # 指標暖機
 
     print(f"商品: {', '.join(cfg['symbols'])}   MinConfirm={cfg['min_conf']}  MaxPos={cfg['max_pos']}")

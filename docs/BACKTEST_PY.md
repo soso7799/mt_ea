@@ -13,8 +13,11 @@
 ## 執行
 
 ```
-G:\我的雲端硬碟\src\mt_ea\scripts\backtest_py.bat --from 2022-01-01 --to 2025-06-30 --deposit 10000
+G:\我的雲端硬碟\src\mt_ea\scripts\backtest_py.bat --deposit 10000
 ```
+
+- 期間預設為**從今天往前 3 年**（用最新的資料）。`--years 5` 改成 5 年；
+  也可以用 `--from 2024-01-01 --to 2024-12-31` 指定。
 
 - `--deposit`：**請填你的帳戶資金**。EA 的淨值下限寫死 9600（為 1 萬美元帳戶設計），
   資金不同結果差很多。

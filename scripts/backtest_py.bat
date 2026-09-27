@@ -4,7 +4,8 @@ REM  Python backtest of MultiCurrency_EA (old vs fixed logic) and
 REM  ML training data generation.
 REM  M1 data is downloaded from the MT5 terminal you picked (FTMO)
 REM  and cached on the history drive (export\bars).
-REM  Usage: backtest_py.bat --from 2022-01-01 --to 2025-06-30 [--deposit 100000]
+REM  Usage: backtest_py.bat [--years 3] [--deposit 100000]
+REM         (default period: the last 3 years up to today)
 REM  Keep MT5 open and logged in. In MT5 set Tools > Options > Charts >
 REM  "Max bars in chart" to Unlimited.
 REM  NOTE: keep this file ASCII-only. cmd misreads UTF-8 batch files.

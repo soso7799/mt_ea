@@ -138,9 +138,17 @@ def main():
                     help="訓練與測試之間的間隔小時，應 >= EA 的 Inp_MLMaxHoldHours")
     ap.add_argument("--keep-timeout", action="store_true", help="逾時的信號當作失敗保留（預設排除）")
     ap.add_argument("--all-rows", action="store_true", help="包含已有持倉 / 波動異常時的信號")
+    ap.add_argument("--holdout-months", type=float, default=0,
+                    help="最近幾個月不拿來訓練，留給 MT5 測試器做最後驗證（例如 3）")
     args = ap.parse_args()
 
     df, feats, files, n_total = load(args.data, args.keep_timeout, args.all_rows)
+    holdout_from = None
+    if args.holdout_months > 0:
+        holdout_from = df["signal_time"].max() - pd.Timedelta(days=round(args.holdout_months * 30.44))
+        n_before = len(df)
+        df = df[df["signal_time"] < holdout_from].reset_index(drop=True)
+        print(f"保留 {holdout_from:%Y-%m-%d} 之後的 {n_before - len(df)} 筆不訓練（留給 MT5 測試器驗證）")
     print(f"讀入 {len(files)} 個檔案，共 {n_total} 筆，可用 {len(df)} 筆，特徵 {len(feats)} 個")
     if len(df) < 1000:
         print("⚠️ 可用資料少於 1000 筆，結果可信度很低，建議拉長回測期間")
@@ -191,6 +199,7 @@ def main():
         "improves_on_baseline": bool(improves),
         "onnx_max_abs_diff": diff,
         "source_files": [os.path.basename(f) for f in files],
+        "holdout_from": str(holdout_from) if holdout_from is not None else None,
     }
     with open(os.path.join(args.out, "model.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -216,7 +225,11 @@ def main():
     if improves:
         lines.append(f"✅ 建議 Inp_MLThreshold = {best['threshold']:.2f}"
                      f"（期望值 {base['exp_r']:+.3f}R → {best['exp_r']:+.3f}R，保留 {best['kept']:.0%} 信號）")
-        lines.append("   下一步：在策略測試器用 Inp_UseML=true 回測『訓練期間之後』的資料確認。")
+        if holdout_from is not None:
+            lines.append(f"   下一步：在 MT5 策略測試器回測 {holdout_from:%Y.%m.%d} 到今天，"
+                         "比較 Inp_UseML=false 與 true。")
+        else:
+            lines.append("   下一步：用 --holdout-months 3 重新訓練，保留最近 3 個月在 MT5 測試器驗證。")
     else:
         lines.append("❌ 模型沒有明顯優於不過濾（期望值改善 < 0.02R 或保留信號太少），不建議啟用 Inp_UseML。")
     lines.append(f"ONNX 與 sklearn 輸出最大差異: {diff:.2e}")
