@@ -279,8 +279,12 @@ def local_times(server_times, local_tz, server_ny_offset):
 # ---------------------------------------------------------------- 模擬
 
 class Sim:
-    def __init__(self, cfg, data, legacy, deposit, commission, local_tz, server_ny_offset, log, start, end):
+    def __init__(self, cfg, data, legacy, deposit, commission, local_tz, server_ny_offset, log, start, end,
+                 opts=None):
         self.cfg, self.legacy, self.log = cfg, legacy, log
+        # 可關閉的 FilterLib 機制（實驗用，EA 本身不變）
+        self.opts = dict(reverse=True, trailing=True, force=True)
+        self.opts.update(opts or {})
         self.syms = cfg["symbols"]
         self.c = cfg["c"]
         self.commission = commission
@@ -481,7 +485,8 @@ class Sim:
 
     def monitor(self, k):
         self.daily_reset(k)
-        self.force_close(k)
+        if self.opts["force"]:
+            self.force_close(k)
         eq = self.balance + self.floating()
         if eq <= self.c["AccountEquityFloor"]:
             self.close_all(k, "EQUITY_FLOOR")
@@ -504,9 +509,10 @@ class Sim:
                 self.close_market(s, k, "VOL")
                 self.sym_lock.add(s)
                 continue
-            self.trailing(s, p, k)
+            if self.opts["trailing"]:
+                self.trailing(s, p, k)
             S = self.S[s]
-            if S["fsig"] is not None and S["posh"][k] >= 0:
+            if self.opts["reverse"] and S["fsig"] is not None and S["posh"][k] >= 0:
                 hb = S["posh"][k]
                 if hb != self.last_bar_f[s]:
                     self.last_bar_f[s] = hb
@@ -781,6 +787,11 @@ def main():
     ap.add_argument("--refresh", action="store_true", help="重新下載 M1 資料")
     ap.add_argument("--equity-floor", type=float, default=None,
                     help="覆寫 FilterLib 的淨值下限 AccountEquityFloor（EA 寫死 9600；填 0 = 停用）")
+    ap.add_argument("--no-reverse", action="store_true", help="實驗：關閉 H1 反向信號平倉")
+    ap.add_argument("--no-trailing", action="store_true", help="實驗：關閉追蹤停損")
+    ap.add_argument("--no-force", action="store_true", help="實驗：關閉每日強平")
+    ap.add_argument("--ablation", action="store_true",
+                    help="實驗：修正後邏輯下，一次比較 原樣 / 無反向平倉 / 無追蹤停損 / 兩者皆無 / 三者皆無")
     ap.add_argument("--day-loss", type=float, default=None,
                     help="覆寫單日虧損上限 DayLossLimit（EA 寫死 -350；例如 -5000）")
     args = ap.parse_args()
@@ -808,15 +819,28 @@ def main():
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.join(args.out, f"py_{args.start}_{args.end}_{stamp}")
     os.makedirs(out_dir, exist_ok=True)
-    modes = ["legacy", "fixed"] if args.mode == "both" else [args.mode]
+    base_opts = dict(reverse=not args.no_reverse, trailing=not args.no_trailing, force=not args.no_force)
+    if args.ablation:
+        variants = [("fixed", "B 原樣", {}),
+                    ("fixed_norev", "B 無反向平倉", dict(reverse=False)),
+                    ("fixed_notrail", "B 無追蹤停損", dict(trailing=False)),
+                    ("fixed_norev_notrail", "B 無反向平倉+無追蹤停損", dict(reverse=False, trailing=False)),
+                    ("fixed_bare", "B 只有固定SL/TP（三者皆無）", dict(reverse=False, trailing=False, force=False))]
+    else:
+        names = {"legacy": "A 舊邏輯 (Inp_LegacySignalOrder=true)", "fixed": "B 修正後 (v5.3)"}
+        modes = ["legacy", "fixed"] if args.mode == "both" else [args.mode]
+        variants = [(m, names[m], base_opts) for m in modes]
+    off = [k for k, v in base_opts.items() if not v]
+    table = []
     report = [f"Python 回測  {args.start} ~ {args.end}  初始資金 {args.deposit:,.0f}  "
               f"手續費 {args.commission}/手  本機時區 {args.local_tz}",
               f"淨值下限 {cfg['c']['AccountEquityFloor']:,.0f}  單日虧損上限 {cfg['c']['DayLossLimit']:,.0f}", ""]
-    for mode in modes:
-        name = "A 舊邏輯 (Inp_LegacySignalOrder=true)" if mode == "legacy" else "B 修正後 (v5.3)"
+    if off and not args.ablation:
+        report.insert(2, "實驗：已關閉 " + ", ".join(off))
+    for mode, name, opts in variants:
         print(f"\n=== 模擬 {name} ===")
         sim = Sim(cfg, data, mode == "legacy", args.deposit, args.commission,
-                  args.local_tz, args.server_ny_offset, print, start, end)
+                  args.local_tz, args.server_ny_offset, print, start, end, opts)
         sim.run()
         res, deals = summarize(sim, name)
         deals.to_csv(os.path.join(out_dir, f"trades_{mode}.csv"), index=False)
@@ -825,8 +849,9 @@ def main():
         txt = fmt_summary(res)
         print(txt)
         report += [txt, ""]
+        table.append(res)
 
-        if mode == "fixed" and args.features_out:
+        if mode == "fixed" and args.features_out and not any(v is False for v in (opts or {}).values()):
             print("產生 ML 訓練資料 ...")
             rows = []
             for s in sim.syms:
@@ -843,6 +868,14 @@ def main():
             print(msg)
             report += [msg, ""]
 
+    if len(table) > 1:
+        rows = [f"{'組合':<26}{'淨利':>12}{'PF':>7}{'最大回撤%':>10}{'交易':>7}{'勝率%':>7}  最後一筆"]
+        for r in table:
+            rows.append(f"{r['name']:<26}{r['net']:>12,.0f}{r.get('pf', 0):>7.2f}{r['max_dd_pct']:>10.1f}"
+                        f"{r['trades']:>7}{r.get('win', 0):>7.1f}  {str(r.get('last_trade', '-'))[:10]}")
+        cmp_txt = "比較\n" + "\n".join(rows)
+        print("\n" + cmp_txt)
+        report += [cmp_txt, ""]
     with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(report) + "\n")
     print(f"\n報告與交易明細: {out_dir}")

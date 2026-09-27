@@ -39,6 +39,16 @@ G:\我的雲端硬碟\src\mt_ea\scripts\backtest_py.bat --deposit 10000
 > 報告的「最後一筆」會停在很早的日期。要看策略在整段期間的表現，加
 > `--equity-floor 0 --day-loss -100000`；要看實際 EA 風控下的結果，則用你帳戶的真實資金、不加這兩個參數。
 
+### 找出哪個機制在虧錢
+
+```
+backtest_py.bat --ablation --equity-floor 0 --day-loss -100000
+```
+
+用修正後邏輯一次跑 5 種組合（原樣 / 無反向平倉 / 無追蹤停損 / 兩者皆無 / 只有固定 SL/TP），
+最後印出比較表。也可以單獨用 `--no-reverse`、`--no-trailing`、`--no-force`。
+這些只影響 Python 模擬，EA 本身不變。
+
 報告另外列出 **FTMO 檢查**：相對初始資金的最大虧損（限 10%）與單日最大虧損（限 5%）。
 
 ## 輸出
