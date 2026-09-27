@@ -5,14 +5,21 @@ REM  Usage: call find_mt5.bat [FolderID]
 REM    - FolderID given : use %APPDATA%\MetaQuotes\Terminal\<FolderID>
 REM    - one folder     : use it
 REM    - several        : show a menu; the choice is saved in
-REM                       mt5_target.txt and reused next time
-REM                       (delete mt5_target.txt to choose again)
+REM                       %APPDATA%\mt_ea\mt5_target.txt (outside this
+REM                       folder, so it survives updating the scripts)
+REM                       and reused next time. Delete it to choose again.
 REM  NOTE: keep this file ASCII-only. cmd misreads UTF-8 batch files.
 REM ============================================================
 setlocal EnableDelayedExpansion
 set "TERM_ROOT=%APPDATA%\MetaQuotes\Terminal"
 set "SEL="
-set "SAVED=%~dp0mt5_target.txt"
+set "SAVED_DIR=%APPDATA%\mt_ea"
+set "SAVED=%SAVED_DIR%\mt5_target.txt"
+REM older versions saved next to this script
+if not exist "%SAVED%" if exist "%~dp0mt5_target.txt" (
+  if not exist "%SAVED_DIR%" mkdir "%SAVED_DIR%"
+  copy /Y "%~dp0mt5_target.txt" "%SAVED%" >nul
+)
 
 if not "%~1"=="" (
   set "SEL=%TERM_ROOT%\%~1"
@@ -60,6 +67,7 @@ if not defined T%PICK% (
   endlocal & exit /b 1
 )
 set "SEL=!T%PICK%!"
+if not exist "%SAVED_DIR%" mkdir "%SAVED_DIR%"
 for %%X in ("!SEL!") do (>"%SAVED%" echo %%~nxX)
 echo Saved. Next time this MT5 is used automatically.
 
