@@ -98,13 +98,14 @@ Excel 分頁：
 ## 關卡限價反轉（limit_reversal.bat，事先定好的單一假設）
 
 ```
-G:\我的雲端硬碟\src\mt_ea\scripts\limit_reversal.bat            （M15）
-G:\我的雲端硬碟\src\mt_ea\scripts\limit_reversal.bat --tf H1
-G:\我的雲端硬碟\src\mt_ea\scripts\limit_reversal.bat --tf M5    （K 線較細、同根先後誤差較小，但只有約 4 個月）
+G:\我的雲端硬碟\src\mt_ea\scripts\limit_reversal.bat              （近 1 年）
+G:\我的雲端硬碟\src\mt_ea\scripts\limit_reversal.bat --years 3    （近 3 年）
 ```
 
 - 關卡：昨高、昨低、昨亞/歐/美盤高低；上方掛賣出限價、下方掛買入限價；每條關卡每天只做第一次
-- 停損關卡外 0.3 ATR、停利往回 1.0 ATR、最多 24 小時；以 Bid/Ask 成交並扣外匯手續費
-- 濾網只比較「不限」與「靠近時量縮」兩種，不做參數搜尋，完整列出前半/後半、各商品、各關卡
+- 停損關卡外 0.3 ATR、停利往回 1.0 ATR、最多 24 小時；ATR 用 H1 ATR(14)（可用 --atr-tf 改）
+- **成交與出場用 M1 K 線模擬**（第一版用 M15 模擬時，73% 的交易在成交當根就被算停損，是量測假象；
+  M1 下同根停損約 1 成，欄位『同根停損率』可檢查）
+- 以 Bid/Ask 成交並扣外匯手續費；濾網只比較「不限」與「靠近時量縮」（前一根 M15 量 < 平均 0.8）
 - 判定：前後半平均 R 都 >0、t≥2、≥60% 商品獲利 → 值得寫成 EA
-- 限制：成交當根若也碰到停損一律算停損（K 線看不出先後），結果偏保守
+- M1 資料存在 `export\bars`（與 Python 回測共用）；舊快取沒有成交量欄位，第一次會自動重新下載

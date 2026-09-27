@@ -10,7 +10,7 @@ import os
 
 import pandas as pd
 
-COLS = ["time", "open", "high", "low", "close", "spread"]
+COLS = ["time", "open", "high", "low", "close", "tick_volume", "spread"]
 
 
 def cache_paths(cache_dir, sym):
@@ -23,6 +23,8 @@ def load_cached(cache_dir, sym):
     if not (os.path.exists(data) and os.path.exists(meta)):
         return None, None
     df = pd.read_csv(data)
+    if "tick_volume" not in df.columns:          # 舊版快取沒有成交量 → 重新下載
+        return None, None
     df["time"] = pd.to_datetime(df["time"])
     with open(meta, encoding="utf-8") as f:
         return df, json.load(f)

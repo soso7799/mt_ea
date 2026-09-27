@@ -5,7 +5,8 @@ REM  Writes the diagnosis workbook to the history drive reports folder.
 REM  Bars are downloaded from the MT5 terminal you picked (FTMO) and
 REM  cached on the history drive (export\bars_mtf); the Excel file goes to
 REM  the history drive reports folder.
-REM  Usage: limit_reversal.bat [--tf M5|M15|H1] [--symbols EURUSD ...]
+REM  Usage: limit_reversal.bat [--years 1] [--atr-tf 1h] [--symbols EURUSD ...]
+REM  Fills and exits are simulated on M1 bars (cached in export\bars).
 REM  Keep MT5 open and logged in.
 REM  NOTE: keep this file ASCII-only. cmd misreads UTF-8 batch files.
 REM ============================================================
@@ -35,10 +36,10 @@ echo === Installing / checking Python packages ===
 python -m pip install -q -r "%ML_DIR%\requirements.txt" || exit /b 1
 
 if not exist "%DATA_ROOT%\reports" mkdir "%DATA_ROOT%\reports"
-echo === Limit reversal test (about 1-2 minutes) ===
+echo === Limit reversal test on M1 (first run downloads M1, may take several minutes) ===
 if defined TERMINAL (
-  python "%AN_DIR%\limit_reversal.py" --cache "%DATA_ROOT%\export\bars_mtf" --out "%DATA_ROOT%\reports" --terminal "!TERMINAL!" %*
+  python "%AN_DIR%\limit_reversal.py" --m1-cache "%DATA_ROOT%\export\bars" --out "%DATA_ROOT%\reports" --terminal "!TERMINAL!" %*
 ) else (
-  python "%AN_DIR%\limit_reversal.py" --cache "%DATA_ROOT%\export\bars_mtf" --out "%DATA_ROOT%\reports" %*
+  python "%AN_DIR%\limit_reversal.py" --m1-cache "%DATA_ROOT%\export\bars" --out "%DATA_ROOT%\reports" %*
 )
 endlocal
