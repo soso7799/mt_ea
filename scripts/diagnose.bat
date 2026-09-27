@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  Indicator usage diagnosis: after each signal, does price continue or revert?
-REM  Writes 指標應用診斷_<time>.xlsx to the history drive reports folder.
+REM  Writes the diagnosis workbook to the history drive reports folder.
 REM  Bars are downloaded from the MT5 terminal you picked (FTMO) and
 REM  cached on the history drive (export\bars_mtf); the Excel file goes to
 REM  the history drive reports folder.
