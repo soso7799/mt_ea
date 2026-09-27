@@ -5,7 +5,8 @@
   只統計每輪「下 TEST 週」的交易（挑參數時沒看過的資料），等於模擬每月重新調參數的真實結果。
 
   觸發（你圖上的指標）：
-    MA 交叉：EMA 快線上穿/下穿慢線
+    MA 交叉：EMA 快線上穿/下穿慢線（你的兩條 EMA）
+    趨勢線突破：移植自 Trendline_Signal_Indicator_MT5 v2.10（Swing 左右 2/3/5 根）
     MACD Hull：主線上穿/下穿訊號線（移植自 Macd Hull.mq5，mladen）
     KDJ（移植自 KDJ_Averages.mq5，SMA 平滑）：K 上穿 D 且 K < 下限（做多）/ K 下穿 D 且 K > 上限（做空）；或 K 穿越 50 線
     TAI：由非多頭轉多頭動能（做多）/ 轉空頭動能（做空）（移植自 TAI_Color_Panel_Optimized.mq5）
@@ -90,7 +91,53 @@ def onset(x):
     return x & ~np.r_[False, x[:-1]]
 
 
-def triggers(o, h, l, c):
+def swing_pivots(h, l, lr):
+    """同 Trendline_Signal_Indicator_MT5：高點嚴格高於右側（較新）lr 根、不低於左側（較舊）lr 根；低點相反。"""
+    n = len(h)
+    hi = np.zeros(n, bool)
+    lo = np.zeros(n, bool)
+    hi[lr:n - lr] = True
+    lo[lr:n - lr] = True
+    for k in range(1, lr + 1):
+        j = np.arange(lr, n - lr)
+        hi[j] &= (h[j] > h[j + k]) & (h[j] >= h[j - k])
+        lo[j] &= (l[j] < l[j + k]) & (l[j] <= l[j - k])
+    return np.flatnonzero(hi), np.flatnonzero(lo)
+
+
+def trendline_break(o, h, l, c, tsec, lr=3, depth=400):
+    """移植自 Trendline_Signal_Indicator_MT5 v2.10（預設：需同向 K、需有效斜率、緩衝 0）。
+    訊號 K 收盤時已確認的最近兩個擺動高點連成壓力線（需下斜），收盤由線下站上線上且為陽線 → 做多；
+    最近兩個擺動低點連成支撐線（需上斜），收盤跌破且為陰線 → 做空。線值依時間內插，同原檔。"""
+    n = len(c)
+    s = np.arange(1, n)
+    out = []
+    for piv, px, sign in ((swing_pivots(h, l, lr)[0], h, 1), (swing_pivots(h, l, lr)[1], l, -1)):
+        sig = np.zeros(n, bool)
+        k = np.searchsorted(piv, s - lr, side="right") - 1          # 最近一個已確認擺動點
+        ok = k >= 1
+        ss, kk = s[ok], k[ok]
+        new, old = piv[kk], piv[kk - 1]
+        ok2 = (ss - old) <= depth
+        ss, new, old = ss[ok2], new[ok2], old[ok2]
+        pn, po = px[new], px[old]
+        slope_ok = (pn < po) if sign > 0 else (pn > po)
+        dt_ = (tsec[new] - tsec[old]).astype(float)
+        dt_[dt_ == 0] = np.nan
+
+        def line(i):
+            return po + (pn - po) * (tsec[i] - tsec[old]) / dt_
+        now, prev = line(ss), line(ss - 1)
+        if sign > 0:
+            fire = slope_ok & (c[ss] > o[ss]) & (c[ss - 1] <= prev) & (c[ss] > now)
+        else:
+            fire = slope_ok & (c[ss] < o[ss]) & (c[ss - 1] >= prev) & (c[ss] < now)
+        sig[ss[np.nan_to_num(fire, nan=0).astype(bool)]] = True
+        out.append(sig)
+    return out[0], out[1]
+
+
+def triggers(o, h, l, c, t=None):
     """回傳 list of (觸發名稱, 參數字串, long_bool, short_bool)。"""
     T = []
     E = {p: ema(c, p) for p in (5, 8, 13, 21, 34, 55, 89, 144)}
@@ -108,6 +155,11 @@ def triggers(o, h, l, c):
     for ma, tp in itertools.product((14, 21, 28, 50), (5, 8)):
         col = tai(o, h, l, c, ma_period=ma, tai_period=tp)[1]
         T.append(("TAI", f"MA{ma}/週期{tp}", onset(col == 1), onset(col == 2)))
+    if t is not None:
+        tsec = t.astype("datetime64[s]").astype(np.int64)
+        for lr in (2, 3, 5):
+            b, sl = trendline_break(o, h, l, c, tsec, lr)
+            T.append(("趨勢線突破", f"Swing{lr}", b, sl))
     return T
 
 
@@ -174,7 +226,7 @@ def combos_for(df, sym, point, contract, commission):
         comm_px = commission / contract * (1.0 if sym.endswith("USD") else np.nanmedian(c))
     F = trend_filters(c)
     out = []
-    for trig, prm, lg, sh in triggers(o, h, l, c):
+    for trig, prm, lg, sh in triggers(o, h, l, c, t):
         for fname, (fu, fd) in F.items():
             L = np.flatnonzero(lg & fu)
             S = np.flatnonzero(sh & fd)
@@ -303,7 +355,7 @@ def main():
             # 你目前的設定：整段期間、前半/後半（順訊號、無濾網、SL1/TP2）
             for cb in combos:
                 key = {"MACD Hull": cb["參數"] == "5/35/5", "KDJ": cb["參數"] in ("9/3/3 區間20/80", "9/3/3 K穿50"),
-                       "TAI": cb["參數"] == "MA28/週期5"}.get(cb["觸發"], False)
+                       "TAI": cb["參數"] == "MA28/週期5", "趨勢線突破": cb["參數"] == "Swing3"}.get(cb["觸發"], False)
                 if key and cb["濾網"] == "無濾網" and cb["SL"] == 1.0 and cb["TP"] == 2.0:
                     mid = df["time"].iloc[len(df) // 2]
                     h1 = cb["R"][cb["t"] < np.datetime64(mid)]
@@ -321,12 +373,12 @@ def main():
     notes = [f"產生時間 {updated}；期間 {start.date()} ~ {end.date()}；週期 {', '.join(args.tf)}",
              f"滾動式最佳化：每輪用過去 {TRAIN_W} 週挑參數（交易≥{MIN_TRAIN_N}、平均R>0、t 最高），交易接下來 {TEST_W} 週，再往前推。",
              "『平均R / t值 / 勝率』只統計每輪『下 4 週』的交易 —— 挑參數時沒用到的資料，等於每月重新調參數的真實結果。",
-             "觸發：MA交叉（EMA）、MACD Hull（移植自 Macd Hull.mq5）、KDJ（KDJ_Averages.mq5，K/D 交叉 + 區間，或 K 穿 50）、TAI（動能轉色）。",
+             "觸發：MA交叉（EMA）、MACD Hull（移植自 Macd Hull.mq5）、KDJ（KDJ_Averages.mq5，K/D 交叉 + 區間，或 K 穿 50）、TAI（動能轉色）、趨勢線突破（Trendline_Signal_Indicator_MT5，Swing 2/3/5）。",
              "每個觸發 × 濾網（無 / EMA50 趨勢 / EMA100 趨勢）× 方向（順訊號 / 反向做）× SL/TP（1/1.5、1/2、1.5/3 ATR），最多持有 48 根，一次一筆。",
              "成交：下一根開盤；買在 Ask、賣在 Bid；同根碰到 SL 與 TP 算 SL。成本：逐根點差 + 外匯手續費。1R = 停損距離。",
              "判定 ✅ 可用：滾動測試 ≥30 筆、平均R>0、t≥2、≥60% 的輪數獲利。",
              "『目前建議』= 用最近 12 週選出的組合（下個月要用的參數）；若該商品判定 ❌，建議參數也不可靠。",
-             "『你目前的設定』= MACD Hull 5/35/5、KDJ 9/3/3、TAI MA28/週期5，順訊號與反向做，無濾網、SL1/TP2，整段期間與前後半。",
+             "『你目前的設定』= MACD Hull 5/35/5、KDJ 9/3/3、TAI MA28/週期5、趨勢線 Swing3，順訊號與反向做，無濾網、SL1/TP2，整段期間與前後半。",
              f"注意：同時檢驗 {len(S)} 個商品×週期，即使完全隨機也可能有 1–2 個碰巧 ✅。"]
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         pd.DataFrame({"說明": notes}).to_excel(xw, sheet_name="說明", index=False)
