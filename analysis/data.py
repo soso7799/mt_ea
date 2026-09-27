@@ -70,7 +70,7 @@ def fetch_all(symbols, cache, terminal=None, bars=None, offline=False, max_age_m
                 continue
             info = mt5.symbol_info(s)
             tick = mt5.symbol_info_tick(s)
-            meta = {"digits": info.digits, "point": info.point, "fetched": now.isoformat(timespec="seconds"),
+            meta = {"digits": info.digits, "point": info.point, "contract": info.trade_contract_size, "fetched": now.isoformat(timespec="seconds"),
                     "bid": tick.bid if tick else None,
                     "tick_time": dt.datetime.utcfromtimestamp(tick.time).isoformat() if tick else None}
             for tf in TFS:
