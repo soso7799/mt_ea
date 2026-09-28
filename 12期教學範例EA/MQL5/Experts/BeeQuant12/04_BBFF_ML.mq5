@@ -1626,6 +1626,7 @@ bool AddStrat(CStrat *p)
 
 int OnInit()
   {
+   if(!BQ_AccountAllowed()) return(INIT_FAILED);
    string syms[];
    int n=BQ_ParseSymbols(InpSymbols,syms);
    for(int i=0;i<n;i++)

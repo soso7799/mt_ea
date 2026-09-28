@@ -65,6 +65,7 @@ double LineValue(const color clr)
 
 int OnInit()
   {
+   if(!BQ_AccountAllowed()) return(INIT_FAILED);
    g_trade.Init(_Symbol,InpMagic,InpMagic+77,InpSlippage);
    g_daily.Init(InpDayReset);
    BQML_Setup(g_ml,"Trendline",_Symbol,(ENUM_TIMEFRAMES)_Period,InpMagic);
