@@ -1453,6 +1453,31 @@ public:
 
 //==================== BQ_ML.mqh 結束 ====================
 
+input group "=== 帳戶保護 ==="
+input bool InpAllowReal   = false; // 允許在「真實帳戶」執行 (預設只在模擬帳戶執行)
+input long InpLockAccount = 0;     // 只允許此帳號執行 (0=不限)
+
+//--- MT5 切換登入帳號時，圖表上的 EA 會留著繼續跑到新帳號；
+//    所以在 OnInit 檢查帳戶，不符合就不啟動 (EA 會自動從圖表移除)
+bool BQ_AccountAllowed()
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return(true);
+   long login=AccountInfoInteger(ACCOUNT_LOGIN);
+   ENUM_ACCOUNT_TRADE_MODE mode=(ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   if(InpLockAccount!=0 && login!=InpLockAccount)
+     {
+      PrintFormat("帳戶保護：目前帳號 %I64d 不是指定帳號 %I64d，EA 不啟動",login,InpLockAccount);
+      return(false);
+     }
+   if(mode==ACCOUNT_TRADE_MODE_REAL && !InpAllowReal)
+     {
+      PrintFormat("帳戶保護：帳號 %I64d 是真實帳戶，InpAllowReal=false，EA 不啟動",login);
+      Alert("EA 未啟動：這是真實帳戶 (要在真實帳戶執行請把 InpAllowReal 設為 true)");
+      return(false);
+     }
+   return(true);
+  }
+
 input group "=== 機器學習 (ML) 訊號過濾 ==="
 input ENUM_BQML_MODE  InpMLMode       = BQML_FILTER;    // ML 模式
 input double          InpMLThreshold  = 0.03;           // 放行門檻：預估勝率需高於兩平勝率多少
