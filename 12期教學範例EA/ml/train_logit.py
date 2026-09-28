@@ -5,16 +5,19 @@
 流程
   1. 回測時設定 InpMLMode=只學習、InpMLExportCSV=true
      → 產生 %APPDATA%\\MetaQuotes\\Terminal\\Common\\Files\\BeeQuantML\\<EA>_<商品>_<週期>_<magic>_tester.csv
-  2. python train_logit.py <csv> [<csv> ...] --out <模型檔>
+  2. 直接執行 python train_logit.py（不加參數）
+     → 自動找 Common\\Files\\BeeQuantML\\ 裡所有 *_tester.csv / *_live.csv，
+       每個檔案各自驗證並輸出同名 .model 到同一個資料夾（EA 會自動載入）
+     也可以指定檔案：python train_logit.py <csv> [<csv> ...] --out <模型檔>
      會做「前 70% 訓練 / 後 30% 驗證」的時間序切分，印出過濾前後的勝率與期望值
-  3. 把 --out 產生的 .model 放回 Common\\Files\\BeeQuantML\\（檔名要與 EA 一致）
-     EA 設 InpMLLoadModel=true 就會載入，之後仍會持續線上學習
+  3. EA 設 InpMLLoadModel=true 就會載入模型，之後仍會持續線上學習
 
 只需要 numpy：pip install numpy
 """
 import argparse
 import csv
-import math
+import glob
+import os
 import sys
 
 import numpy as np
@@ -38,7 +41,7 @@ def load(paths):
                 rows.append((r["time"], x, y, be))
     rows.sort(key=lambda t: t[0])
     if not rows:
-        sys.exit("沒有讀到資料，請確認 CSV 是 BQ_ML 匯出的格式")
+        sys.exit("沒有讀到資料 (檔案是空的或格式不符)：" + ", ".join(paths))
     X = np.array([r[1] for r in rows], dtype=float)
     y = np.array([r[2] for r in rows], dtype=float)
     be = np.array([r[3] for r in rows], dtype=float)
@@ -95,17 +98,25 @@ def save_model(path, w, b, mean, sd, n):
         f.write(",".join(f"{v:.10f}" for v in m2) + "\n")
 
 
-def main():
-    ap = argparse.ArgumentParser(description="訓練 BQ_ML 模型")
-    ap.add_argument("csv", nargs="+", help="BQ_ML 匯出的 CSV")
-    ap.add_argument("--out", help="輸出模型檔 (.model)")
-    ap.add_argument("--edge", type=float, default=0.03, help="放行門檻：高於兩平勝率多少 (同 EA 的 InpMLThreshold)")
-    ap.add_argument("--split", type=float, default=0.7, help="訓練資料比例 (依時間切分)")
-    a = ap.parse_args()
+def common_dir():
+    appdata = os.environ.get("APPDATA", "")
+    return os.path.join(appdata, "MetaQuotes", "Terminal", "Common", "Files", "BeeQuantML")
 
-    X, y, be = load(a.csv)
+
+def model_name_for(csv_path):
+    """<EA>_<商品>_<週期>_<magic>_tester.csv → <EA>_<商品>_<週期>_<magic>.model (與 EA 相同檔名)"""
+    base = os.path.basename(csv_path)
+    for suffix in ("_tester.csv", "_live.csv", ".csv"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return os.path.join(os.path.dirname(csv_path), base + ".model")
+
+
+def train_one(paths, out, edge, split):
+    X, y, be = load(paths)
     n = len(y)
-    k = int(n * a.split)
+    k = int(n * split)
     print(f"樣本 {n} 筆，訓練 {k} / 驗證 {n - k}，整體勝率 {y.mean():.1%}")
     if k < 50 or n - k < 20:
         print("樣本太少，結果僅供參考 (建議至少數百筆)")
@@ -114,22 +125,52 @@ def main():
     if n - k > 0:
         p = predict(X[k:], w, b, mean, sd)
         yt, bt = y[k:], be[k:]
-        keep = p >= bt + a.edge
-        print(f"驗證 AUC {auc(yt, p):.3f}")
+        keep = p >= bt + edge
+        print(f"驗證 AUC {auc(yt, p):.3f}  (0.5 = 沒有預測力)")
         print(f"不過濾：{len(yt)} 筆 勝率 {yt.mean():.1%} 期望值 {expectancy(yt, bt):+.3f}R")
         if keep.any():
             print(f"過濾後：{keep.sum()} 筆 勝率 {yt[keep].mean():.1%} 期望值 {expectancy(yt[keep], bt[keep]):+.3f}R")
         else:
             print("過濾後：沒有任何單通過門檻，請降低 --edge")
 
-    print("\n權重 (標準化後)：")
+    print("權重 (標準化後)：")
     for name, v in sorted(zip(FEATURES, w), key=lambda t: -abs(t[1])):
         print(f"  {name:16s} {v:+.4f}")
 
-    if a.out:
+    if out:
         w, b, mean, sd = fit(X, y)        # 用全部資料重新訓練後輸出
-        save_model(a.out, w, b, mean, sd, n)
-        print(f"\n模型已輸出：{a.out}")
+        save_model(out, w, b, mean, sd, n)
+        print(f"模型已輸出：{out}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="訓練 BQ_ML 模型 (不加參數 = 自動處理 Common\\Files\\BeeQuantML 裡所有 CSV)")
+    ap.add_argument("csv", nargs="*", help="BQ_ML 匯出的 CSV (可省略)")
+    ap.add_argument("--out", help="輸出模型檔 (.model)；省略時自動命名在 CSV 同資料夾")
+    ap.add_argument("--edge", type=float, default=0.03, help="放行門檻：高於兩平勝率多少 (同 EA 的 InpMLThreshold)")
+    ap.add_argument("--split", type=float, default=0.7, help="訓練資料比例 (依時間切分)")
+    a = ap.parse_args()
+
+    if a.csv:
+        train_one(a.csv, a.out or model_name_for(a.csv[0]), a.edge, a.split)
+        return
+
+    folder = common_dir()
+    files = sorted(glob.glob(os.path.join(folder, "*.csv")))
+    if not files:
+        print(f"在 {folder} 找不到任何 CSV。")
+        print("請先在 MT5 策略測試器回測 EA，參數設定：")
+        print("  InpMLMode      = 只學習、不過濾")
+        print("  InpMLExportCSV = true")
+        print("回測結束後再執行一次本程式；或直接指定檔案：python train_logit.py 檔案.csv")
+        return
+    for f in files:
+        print("=" * 70)
+        print(os.path.basename(f))
+        try:
+            train_one([f], model_name_for(f), a.edge, a.split)
+        except SystemExit as e:
+            print(e)
 
 
 if __name__ == "__main__":

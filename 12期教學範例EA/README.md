@@ -121,12 +121,19 @@ MagicNumber 規則沿用原版（空單 = 多單 + 77；Jimmy 空單 +1；BBFF �
 
 ### 離線訓練（選用）
 
+1. 在 MT5 策略測試器回測 EA，參數設 `InpMLMode = 只學習`、`InpMLExportCSV = true`。
+   回測結束後，訓練資料會出現在 `%APPDATA%\MetaQuotes\Terminal\Common\Files\BeeQuantML\`。
+2. 執行（不用加任何參數）：
+
 ```bash
 pip install numpy
-python ml/train_logit.py  <Common\Files\BeeQuantML\xxx_tester.csv>  --out xxx.model
+python ml/train_logit.py
 ```
 
-程式會依時間切分：前 70% 訓練、後 30% 驗證，印出 AUC 與過濾前後的勝率、期望值 (R)。產生的 `.model` 放回 `Common\Files\BeeQuantML\`，檔名要跟 EA 日誌裡印出的相同，EA 載入後仍會繼續線上學習。
+程式會自動找出該資料夾裡所有 CSV，每個檔案依時間切分：前 70% 訓練、後 30% 驗證，印出 AUC 與過濾前後的勝率、期望值 (R)。
+接著在同一個資料夾輸出同名的 `.model` 檔（例如 `Friday_EURUSD_H1_1234.model`），EA 下次啟動 (`InpMLLoadModel = true`) 就會自動載入，並繼續線上學習。
+
+也可以指定檔案：`python ml/train_logit.py 檔案.csv --out 模型.model`
 
 ### 注意
 
