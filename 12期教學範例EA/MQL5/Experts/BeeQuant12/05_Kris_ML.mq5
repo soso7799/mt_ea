@@ -17,8 +17,8 @@
 #property link      "https://beequant.soci.vip/"
 #property version   "2.00"
 
-#include <BeeQuant/BQ_Trade.mqh>
-#include <BeeQuant/BQ_Indicators.mqh>
+#include "BeeQuant/BQ_Trade.mqh"
+#include "BeeQuant/BQ_Indicators.mqh"
 
 input group "=== 策略參數 ==="
 input int    InpShortMA    = 10;    // 短均線 (SMA)
@@ -40,7 +40,7 @@ input int    InpMaxSpread  = 0;     // 最大點差 (點, 0=不限)
 input int    InpSlippage   = 100;   // 滑價 (點)
 input long   InpMagic      = 9999;  // MagicNumber (空單 = +77)
 
-#include <BeeQuant/BQ_MLInputs.mqh>
+#include "BeeQuant/BQ_MLInputs.mqh"
 
 CBQTrade        g_trade;
 CBQBarGuard     g_guardOpen,g_guardClose;

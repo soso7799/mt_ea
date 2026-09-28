@@ -20,8 +20,8 @@
 #property link      "https://beequant.soci.vip/"
 #property version   "2.00"
 
-#include <BeeQuant/BQ_Trade.mqh>
-#include <BeeQuant/BQ_Indicators.mqh>
+#include "BeeQuant/BQ_Trade.mqh"
+#include "BeeQuant/BQ_Indicators.mqh"
 
 input group "=== 多方參數 ==="
 input int    InpFastLong   = 33;    // 多方快線 (EMA)
@@ -52,7 +52,7 @@ input int    InpMaxSpread  = 0;     // 最大點差 (點, 0=不限)
 input int    InpSlippage   = 100;   // 滑價 (點)
 input long   InpMagic      = 1491491; // MagicNumber (空單 = +1，沿用原版)
 
-#include <BeeQuant/BQ_MLInputs.mqh>
+#include "BeeQuant/BQ_MLInputs.mqh"
 
 CBQTrade        g_trade;
 CBQBarGuard     g_guardBuy,g_guardSell;

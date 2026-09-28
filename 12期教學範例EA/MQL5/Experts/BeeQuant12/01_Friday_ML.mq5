@@ -18,8 +18,8 @@
 #property link      "https://beequant.soci.vip/"
 #property version   "2.00"
 
-#include <BeeQuant/BQ_Trade.mqh>
-#include <BeeQuant/BQ_Indicators.mqh>
+#include "BeeQuant/BQ_Trade.mqh"
+#include "BeeQuant/BQ_Indicators.mqh"
 
 input group "=== 資金 / 風控 ==="
 input double InpMinBalance    = 3000;   // 餘額低於此值停止交易
@@ -38,7 +38,7 @@ input double InpSLATRMult      = 1.3;   // 停損 ATR 倍數 (商品不在表中
 input int    InpMaxTradesDay   = 5;     // 每日下單次數上限
 input int    InpDayResetHour   = 6;     // 每日次數歸零時間 (伺服器時)
 
-#include <BeeQuant/BQ_MLInputs.mqh>
+#include "BeeQuant/BQ_MLInputs.mqh"
 
 CBQTrade        g_trade;
 CBQBarGuard     g_guardBuy,g_guardSell;

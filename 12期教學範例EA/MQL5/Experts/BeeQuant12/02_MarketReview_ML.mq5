@@ -19,8 +19,8 @@
 #property link      "https://beequant.soci.vip/"
 #property version   "2.00"
 
-#include <BeeQuant/BQ_Trade.mqh>
-#include <BeeQuant/BQ_Indicators.mqh>
+#include "BeeQuant/BQ_Trade.mqh"
+#include "BeeQuant/BQ_Indicators.mqh"
 
 enum ENUM_MR_ENTRY
   {
@@ -72,7 +72,7 @@ input int    InpMaxSpread = 0;     // 最大點差 (點, 0=不限)
 input int    InpSlippage  = 100;   // 滑價 (點)
 input long   InpMagic     = 100;   // MagicNumber (空單 = +77)
 
-#include <BeeQuant/BQ_MLInputs.mqh>
+#include "BeeQuant/BQ_MLInputs.mqh"
 
 CBQTrade  g_trade;
 CBQNewBar g_newBar;
