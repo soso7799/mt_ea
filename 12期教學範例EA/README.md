@@ -9,23 +9,26 @@
 
 ```
 12期教學範例EA/
-├─ MQL5/Experts/BeeQuant12/     ← 整個資料夾複製到 MT5 的 MQL5\Experts\
-│  ├─ 01_Friday_ML.mq5 … X2_FiveMinMomentum_ML.mq5   14 支 EA
-│  └─ BeeQuant/                 ← 共用函式庫 (取代 cash.mqh / cash_v2.mqh)
-│      ├─ BQ_Trade.mqh          下單/平倉/改單/手數計算
-│      ├─ BQ_Indicators.mqh     指標 handle 快取、新K棒判斷、每日計數器
-│      ├─ BQ_ML.mqh             機器學習過濾器 (線上邏輯斯迴歸)
-│      └─ BQ_MLInputs.mqh       各 EA 共用的 ML 參數
-└─ ml/train_logit.py           ← (選用) 離線訓練模型
+├─ MQL5/Experts/BeeQuant12/   ← 【安裝用】14 支 EA，每支都是「單一檔案」(已內嵌函式庫)
+├─ src/                       ← 【原始碼】要修改程式時改這裡
+│  └─ Experts/
+│      ├─ 01_Friday_ML.mq5 …  EA 本體
+│      └─ BeeQuant/           共用函式庫 (取代 cash.mqh / cash_v2.mqh)
+│          ├─ BQ_Trade.mqh        下單/平倉/改單/手數計算
+│          ├─ BQ_Indicators.mqh   指標 handle 快取、新K棒判斷、每日計數器
+│          ├─ BQ_ML.mqh           機器學習過濾器 (線上邏輯斯迴歸)
+│          └─ BQ_MLInputs.mqh     各 EA 共用的 ML 參數
+├─ tools/build_single.py      ← 改完 src/ 後執行，重新產生單檔 EA
+└─ ml/train_logit.py          ← (選用) 離線訓練模型
 ```
 
 ## 安裝
 
-1. MT5 →「檔案」→「開啟資料資料夾」。
-2. 把 `MQL5/Experts/BeeQuant12` **整個資料夾**（含裡面的 `BeeQuant` 子資料夾）複製到 MT5 的 `MQL5/Experts/`。
-   函式庫跟 EA 放在一起，不需要另外複製到 `Include`。
-3. MetaEditor 打開任一支 EA，按 F7 編譯。
-4. 這版**不再需要** `cash.mqh`、`cash_v2.mqh`。`function_MT5.mq5` 只是函式範例集，不是 EA，功能已由 `BQ_Trade.mqh` 取代。
+1. MT5 →「檔案」→「開啟資料資料夾」→ 進入 `MQL5\Experts\`。
+2. 把 `MQL5/Experts/BeeQuant12/` 裡想用的 `.mq5` 複製過去（放在 `Experts` 底下任何資料夾都可以）。
+   每支 EA 都是獨立單檔，**不需要**另外複製任何 `.mqh`。
+3. MetaEditor 打開 EA，按 F7 編譯。
+4. 這版不再需要 `cash.mqh`、`cash_v2.mqh`；`function_MT5.mq5` 只是函式範例集，功能已由 `BQ_Trade.mqh` 取代。
 
 檔案都是 UTF-8 (含 BOM)，中文註解在 MetaEditor 可正常顯示。
 
