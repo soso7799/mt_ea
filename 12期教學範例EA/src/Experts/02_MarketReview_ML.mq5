@@ -324,7 +324,7 @@ public:
    int Setup()
      {
       m_trade.Init(m_sym,InpMagic,InpMagic+77,InpSlippage);
-      BQML_Setup(StringFormat("MarketReview_E%d_X%d",(int)InpEntry,(int)InpExit),InpMagic);
+      BQML_Setup(m_ml,StringFormat("MarketReview_E%d_X%d",(int)InpEntry,(int)InpExit),m_sym,m_tf,InpMagic);
       return(INIT_SUCCEEDED);
      }
 
