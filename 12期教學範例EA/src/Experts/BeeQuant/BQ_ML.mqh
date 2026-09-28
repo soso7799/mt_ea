@@ -392,9 +392,9 @@ public:
       m_feat.Init(sym,tf);
 
       if(load && m_model.Load(m_file))
-         PrintFormat("BQ_ML: 已載入模型 %s (已學習 %I64d 筆)",m_file,m_model.updates);
+         PrintFormat("[%s] BQ_ML: 已載入模型 %s (已學習 %I64d 筆)",m_sym,m_file,m_model.updates);
       else
-         PrintFormat("BQ_ML: 使用新模型，前 %d 個訊號不過濾 (暖機)",m_minSamples);
+         PrintFormat("[%s] BQ_ML: 使用新模型，前 %d 個訊號不過濾 (暖機)",m_sym,m_minSamples);
 
       m_csv=INVALID_HANDLE;
       if(exportCsv && !opt)
@@ -410,7 +410,7 @@ public:
                       BQML_FeatureName(3),BQML_FeatureName(4),BQML_FeatureName(5),BQML_FeatureName(6),
                       BQML_FeatureName(7),BQML_FeatureName(8),BQML_FeatureName(9),BQML_FeatureName(10),
                       BQML_FeatureName(11),"label");
-            PrintFormat("BQ_ML: 訓練資料輸出至 Common\\Files\\%s",cf);
+            PrintFormat("[%s] BQ_ML: 訓練資料輸出至 Common\\Files\\%s",m_sym,cf);
            }
         }
       return(true);
@@ -481,7 +481,7 @@ public:
       m_sigBar[k]=bar;
       m_sigDecision[k]=ok;
       if(!ok && !MQLInfoInteger(MQL_OPTIMIZATION))
-         PrintFormat("BQ_ML: 擋掉%s訊號 預估勝率 %.3f < 兩平 %.3f + 優勢 %.2f",(dir>0 ? "多單" : "空單"),p,be,m_thr);
+         PrintFormat("[%s] BQ_ML: 擋掉%s訊號 預估勝率 %.3f < 兩平 %.3f + 優勢 %.2f",m_sym,(dir>0 ? "多單" : "空單"),p,be,m_thr);
       return(ok);
      }
 
@@ -545,7 +545,7 @@ public:
       if(m_save && m_model.updates>0)
         {
          if(m_model.Save(m_file))
-            PrintFormat("BQ_ML: 模型已儲存 Common\\Files\\%s",m_file);
+            PrintFormat("[%s] BQ_ML: 模型已儲存 Common\\Files\\%s",m_sym,m_file);
         }
       if(m_csv!=INVALID_HANDLE)
         {
@@ -554,17 +554,17 @@ public:
         }
       if(!MQLInfoInteger(MQL_OPTIMIZATION))
         {
-         PrintFormat("BQ_ML 統計: 訊號 %d | 放行 %d | 擋掉 %d | 已標記 %d (勝 %d, %.1f%%)",
+         PrintFormat("[%s] BQ_ML 統計: 訊號 %d | 放行 %d | 擋掉 %d | 已標記 %d (勝 %d, %.1f%%)",m_sym,
                      m_signals,m_allowed,m_blocked,m_resolved,m_wins,
                      (m_resolved>0 ? 100.0*m_wins/m_resolved : 0.0));
          if(m_allowedN>0 || m_blockedN>0)
-            PrintFormat("BQ_ML 過濾效果: 放行單勝率 %.1f%% (%d 筆) vs 擋掉單勝率 %.1f%% (%d 筆)",
+            PrintFormat("[%s] BQ_ML 過濾效果: 放行單勝率 %.1f%% (%d 筆) vs 擋掉單勝率 %.1f%% (%d 筆)",m_sym,
                         (m_allowedN>0 ? 100.0*m_allowedWins/m_allowedN : 0.0),m_allowedN,
                         (m_blockedN>0 ? 100.0*m_blockedWins/m_blockedN : 0.0),m_blockedN);
          if(m_scoredN>0)
-            PrintFormat("BQ_ML 暖機後預測準確率: %.1f%% (%d 筆)",100.0*m_correct/m_scoredN,m_scoredN);
+            PrintFormat("[%s] BQ_ML 暖機後預測準確率: %.1f%% (%d 筆)",m_sym,100.0*m_correct/m_scoredN,m_scoredN);
          for(int i=0;i<BQML_NF;i++)
-            PrintFormat("BQ_ML 權重 %-16s %+.4f",BQML_FeatureName(i),m_model.w[i]);
+            PrintFormat("[%s] BQ_ML 權重 %-16s %+.4f",m_sym,BQML_FeatureName(i),m_model.w[i]);
         }
      }
   };

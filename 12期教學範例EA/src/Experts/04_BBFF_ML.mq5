@@ -14,12 +14,19 @@
 //|   * 手數對齊交易量步進；送單檢查 retcode                             |
 //|   * 原版多空共用同一 MagicNumber → 保留 (相容舊單)                   |
 //+------------------------------------------------------------------+
+//| ★ 掛在任何圖表皆可：依 InpSymbols / InpBaseTF 交易 (預設=原版商品與週期) |
+//+------------------------------------------------------------------+
 #property copyright "所有EA皆為教學範例，不保證未來獲利，任何參數請自行回測研究後再使用"
 #property link      "https://beequant.soci.vip/"
 #property version   "2.00"
 
 #include "BeeQuant/BQ_Trade.mqh"
 #include "BeeQuant/BQ_Indicators.mqh"
+#include "BeeQuant/BQ_Multi.mqh"
+
+input group "=== 交易商品 / 週期 (掛在任何圖表皆可) ==="
+input string          InpSymbols = ""; // 交易商品 (逗號分隔；原版未指定商品；空白=圖表商品)
+input ENUM_TIMEFRAMES InpBaseTF  = PERIOD_CURRENT; // 策略週期 (原版圖表週期；目前=圖表週期)
 
 input group "=== 交易時段 ==="
 input int    InpStartHour  = 21;    // 開始時間 (伺服器時)
@@ -54,109 +61,194 @@ input long   InpMagic      = 123;   // MagicNumber (多空共用)
 
 #include "BeeQuant/BQ_MLInputs.mqh"
 
-CBQTrade        g_trade;
-CBQBarGuard     g_guard;
-CBQDailyCounter g_daily;
-
-bool WorkDay()
+//+------------------------------------------------------------------+
+//| 策略本體：每個交易商品一個物件 (m_sym / m_tf 取代 _Symbol / _Period) |
+//+------------------------------------------------------------------+
+class CStrat
   {
-   switch(BQ_DayOfWeek())
+public:
+   string          m_sym;    // 交易商品
+   ENUM_TIMEFRAMES m_tf;     // 策略週期
+   string          m_panel;  // 面板文字
+   CBQMLFilter     m_ml;     // 此商品的 ML 過濾器
+
+                     CStrat() {}
+   void              SetPanel(const string s) { m_panel=s; }
+
+   CBQTrade        m_trade;
+   CBQBarGuard     m_guard;
+   CBQDailyCounter m_daily;
+
+   bool WorkDay()
      {
-      case 1: return(InpMon);
-      case 2: return(InpTue);
-      case 3: return(InpWed);
-      case 4: return(InpThu);
-      case 5: return(InpFri);
+      switch(BQ_DayOfWeek())
+        {
+         case 1: return(InpMon);
+         case 2: return(InpTue);
+         case 3: return(InpWed);
+         case 4: return(InpThu);
+         case 5: return(InpFri);
+        }
+      return(false);
      }
-   return(false);
-  }
 
-bool InSession()
-  {
-   int h=BQ_Hour();
-   if(InpStartHour<InpStopHour) return(h>=InpStartHour && h<InpStopHour);
-   return(h>=InpStartHour || h<InpStopHour);
-  }
+   bool InSession()
+     {
+      int h=BQ_Hour();
+      if(InpStartHour<InpStopHour) return(h>=InpStartHour && h<InpStopHour);
+      return(h>=InpStartHour || h<InpStopHour);
+     }
 
-bool OpenBuy(const double atr,const string cmt)
-  {
-   double ask=g_trade.Ask();
-   double sl=ask-atr*InpSLMult, tp=ask+atr*InpTPMult;
-   if(!g_ml.Allow(1,atr*InpSLMult,atr*InpTPMult)) return(false);
-   double lots=g_trade.CalcLots(InpAutoLots,InpRiskPct,atr*InpSLMult,InpLots,InpMaxLots)*g_ml.LotFactor();
-   return(g_trade.Buy(lots,sl,tp,cmt));
-  }
+   bool OpenBuy(const double atr,const string cmt)
+     {
+      double ask=m_trade.Ask();
+      double sl=ask-atr*InpSLMult, tp=ask+atr*InpTPMult;
+      if(!m_ml.Allow(1,atr*InpSLMult,atr*InpTPMult)) return(false);
+      double lots=m_trade.CalcLots(InpAutoLots,InpRiskPct,atr*InpSLMult,InpLots,InpMaxLots)*m_ml.LotFactor();
+      return(m_trade.Buy(lots,sl,tp,cmt));
+     }
 
-bool OpenSell(const double atr,const string cmt)
+   bool OpenSell(const double atr,const string cmt)
+     {
+      double bid=m_trade.Bid();
+      double sl=bid+atr*InpSLMult, tp=bid-atr*InpTPMult;
+      if(!m_ml.Allow(-1,atr*InpSLMult,atr*InpTPMult)) return(false);
+      double lots=m_trade.CalcLots(InpAutoLots,InpRiskPct,atr*InpSLMult,InpLots,InpMaxLots)*m_ml.LotFactor();
+      return(m_trade.Sell(lots,sl,tp,cmt));
+     }
+
+   int Setup()
+     {
+      m_trade.Init(m_sym,InpMagic,InpMagic,InpSlippage);
+      m_daily.Init(InpDayReset);
+      BQ_hATR(m_sym,m_tf,InpBandsPeriod);
+      BQ_hBands(m_sym,m_tf,InpBandsPeriod,0,InpBandsDev,PRICE_CLOSE);
+      BQML_Setup(m_ml,"BBFF",m_sym,m_tf,InpMagic);
+      return(INIT_SUCCEEDED);
+     }
+
+   void Shutdown()
+     {
+      m_ml.Deinit();
+     }
+
+
+   void Tick()
+     {
+      m_ml.OnTick();
+      if(AccountInfoDouble(ACCOUNT_BALANCE)<=InpMinBalance) return;
+
+      bool work=InSession() && WorkDay();
+      if(!work)
+        {
+         if(m_trade.CountAll()>0) m_trade.CloseAll();
+         return;
+        }
+      double atr=BQ_ATR(m_sym,m_tf,InpBandsPeriod,1);
+      double up =BQ_Bands(m_sym,m_tf,InpBandsPeriod,InpBandsDev,PRICE_CLOSE,1,0);
+      double lo =BQ_Bands(m_sym,m_tf,InpBandsPeriod,InpBandsDev,PRICE_CLOSE,2,0);
+      if(!BQ_Ok(atr) || !BQ_Ok(up) || !BQ_Ok(lo) || atr<=0) return;
+      if(m_guard.Done(m_sym,InpGuardTF) || m_daily.Count()>=InpMaxTradesDay || !m_trade.SpreadOK(InpMaxSpread))
+         return;
+
+      double ask=m_trade.Ask(),bid=m_trade.Bid();
+      double work_=InpDivWork*_Point, sig=InpDivSignal*_Point;
+      bool nearUpper=(ask-sig>=up-work_ && ask-sig<=up+work_);
+      bool nearLower=(bid+sig<=lo+work_ && bid+sig>=lo-work_);
+      int nb=m_trade.CountBuy(), ns=m_trade.CountSell();
+
+      if(nb+ns==0)
+        {
+         if(nearUpper && OpenSell(atr,"BBFF Sell")) { m_daily.Inc(); m_guard.Mark(m_sym,InpGuardTF); }
+         else if(nearLower && OpenBuy(atr,"BBFF Buy")) { m_daily.Inc(); m_guard.Mark(m_sym,InpGuardTF); }
+        }
+      else if(InpWorkAlt)
+        {
+         if(nb>0 && nearUpper)
+           {
+            m_trade.CloseBuy();
+            if(OpenSell(atr,"Turn Sell")) { m_daily.Inc(); m_guard.Mark(m_sym,InpGuardTF); }
+           }
+         else if(ns>0 && nearLower)
+           {
+            m_trade.CloseSell();
+            if(OpenBuy(atr,"Turn Buy")) { m_daily.Inc(); m_guard.Mark(m_sym,InpGuardTF); }
+           }
+        }
+      SetPanel(StringFormat("BBFF ML\n上軌 %.5f  下軌 %.5f\n今日下單 %d\n%s",up,lo,m_daily.Count(),m_ml.Status()));
+     }
+  };
+
+//+------------------------------------------------------------------+
+//| 多商品執行：OnTick (圖表商品報價) + OnTimer (每秒) 輪流執行每個商品  |
+//+------------------------------------------------------------------+
+CStrat *g_strats[];
+
+bool AddStrat(CStrat *p)
   {
-   double bid=g_trade.Bid();
-   double sl=bid+atr*InpSLMult, tp=bid-atr*InpTPMult;
-   if(!g_ml.Allow(-1,atr*InpSLMult,atr*InpTPMult)) return(false);
-   double lots=g_trade.CalcLots(InpAutoLots,InpRiskPct,atr*InpSLMult,InpLots,InpMaxLots)*g_ml.LotFactor();
-   return(g_trade.Sell(lots,sl,tp,cmt));
+   if(p.Setup()!=INIT_SUCCEEDED)
+     {
+      PrintFormat("BBFF：%s 初始化失敗，略過此商品",p.m_sym);
+      delete p;
+      return(false);
+     }
+   int k=ArraySize(g_strats);
+   ArrayResize(g_strats,k+1);
+   g_strats[k]=p;
+   return(true);
   }
 
 int OnInit()
   {
-   g_trade.Init(_Symbol,InpMagic,InpMagic,InpSlippage);
-   g_daily.Init(InpDayReset);
-   BQ_hATR(_Symbol,_Period,InpBandsPeriod);
-   BQ_hBands(_Symbol,_Period,InpBandsPeriod,0,InpBandsDev,PRICE_CLOSE);
-   BQML_Setup("BBFF",InpMagic);
+   string syms[];
+   int n=BQ_ParseSymbols(InpSymbols,syms);
+   for(int i=0;i<n;i++)
+     {
+      CStrat *p=new CStrat;
+      p.m_sym=syms[i];
+      p.m_tf=BQ_TF(InpBaseTF);
+      AddStrat(p);
+     }
+   if(ArraySize(g_strats)==0)
+     {
+      Print("BBFF：沒有可交易的商品，請檢查 InpSymbols");
+      return(INIT_FAILED);
+     }
+   string list="";
+   for(int i=0;i<ArraySize(g_strats);i++)
+      list+=(i>0 ? "," : "")+g_strats[i].m_sym;
+   PrintFormat("BBFF：執行 %d 個商品 [%s] 週期 %s (圖表 %s 只是載體)",ArraySize(g_strats),list,
+               EnumToString(BQ_TF(InpBaseTF)),_Symbol);
+   EventSetTimer(1);
    return(INIT_SUCCEEDED);
   }
 
 void OnDeinit(const int reason)
   {
-   g_ml.Deinit();
+   EventKillTimer();
+   for(int i=0;i<ArraySize(g_strats);i++)
+     {
+      g_strats[i].Shutdown();
+      delete g_strats[i];
+     }
+   ArrayResize(g_strats,0);
    BQ_ReleaseIndicators();
    Comment("");
   }
 
 double OnTester() { return(BQ_TesterScore()); }
 
-void OnTick()
+void RunAll()
   {
-   g_ml.OnTick();
-   if(AccountInfoDouble(ACCOUNT_BALANCE)<=InpMinBalance) return;
-
-   bool work=InSession() && WorkDay();
-   if(!work)
+   string body="";
+   for(int i=0;i<ArraySize(g_strats);i++)
      {
-      if(g_trade.CountAll()>0) g_trade.CloseAll();
-      return;
+      g_strats[i].Tick();
+      body+=BQ_PanelLine(g_strats[i].m_sym,g_strats[i].m_panel);
      }
-   double atr=BQ_ATR(_Symbol,_Period,InpBandsPeriod,1);
-   double up =BQ_Bands(_Symbol,_Period,InpBandsPeriod,InpBandsDev,PRICE_CLOSE,1,0);
-   double lo =BQ_Bands(_Symbol,_Period,InpBandsPeriod,InpBandsDev,PRICE_CLOSE,2,0);
-   if(!BQ_Ok(atr) || !BQ_Ok(up) || !BQ_Ok(lo) || atr<=0) return;
-   if(g_guard.Done(_Symbol,InpGuardTF) || g_daily.Count()>=InpMaxTradesDay || !g_trade.SpreadOK(InpMaxSpread))
-      return;
-
-   double ask=g_trade.Ask(),bid=g_trade.Bid();
-   double work_=InpDivWork*_Point, sig=InpDivSignal*_Point;
-   bool nearUpper=(ask-sig>=up-work_ && ask-sig<=up+work_);
-   bool nearLower=(bid+sig<=lo+work_ && bid+sig>=lo-work_);
-   int nb=g_trade.CountBuy(), ns=g_trade.CountSell();
-
-   if(nb+ns==0)
-     {
-      if(nearUpper && OpenSell(atr,"BBFF Sell")) { g_daily.Inc(); g_guard.Mark(_Symbol,InpGuardTF); }
-      else if(nearLower && OpenBuy(atr,"BBFF Buy")) { g_daily.Inc(); g_guard.Mark(_Symbol,InpGuardTF); }
-     }
-   else if(InpWorkAlt)
-     {
-      if(nb>0 && nearUpper)
-        {
-         g_trade.CloseBuy();
-         if(OpenSell(atr,"Turn Sell")) { g_daily.Inc(); g_guard.Mark(_Symbol,InpGuardTF); }
-        }
-      else if(ns>0 && nearLower)
-        {
-         g_trade.CloseSell();
-         if(OpenBuy(atr,"Turn Buy")) { g_daily.Inc(); g_guard.Mark(_Symbol,InpGuardTF); }
-        }
-     }
-   BQ_Panel(StringFormat("BBFF ML\n上軌 %.5f  下軌 %.5f\n今日下單 %d\n%s",up,lo,g_daily.Count(),g_ml.Status()));
+   BQ_PanelMulti("BBFF ML  (商品 "+IntegerToString(ArraySize(g_strats))+")",body);
   }
+
+void OnTick()  { RunAll(); }
+void OnTimer() { RunAll(); }
 //+------------------------------------------------------------------+

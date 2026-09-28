@@ -1,11 +1,10 @@
 ﻿//+------------------------------------------------------------------+
 //|  BQ_MLInputs.mqh — 所有 EA 共用的 ML 參數與全域過濾器物件            |
-//|  EA 只要：                                                         |
-//|     #include <BeeQuant/BQ_MLInputs.mqh>                            |
-//|     OnInit   : BQML_Setup("EA名稱", magic);                        |
-//|     OnTick   : g_ml.OnTick();                                      |
-//|     下單前   : if(!g_ml.Allow(方向, 停損距離, 停利距離)) 不下單     |
-//|     OnDeinit : g_ml.Deinit();                                      |
+//|  EA 只要 (每個商品一個 CBQMLFilter 物件 ml)：                        |
+//|     初始化   : BQML_Setup(ml,"EA名稱",商品,週期,magic);             |
+//|     每個 tick: ml.OnTick();                                        |
+//|     下單前   : if(!ml.Allow(方向, 停損距離, 停利距離)) 不下單       |
+//|     結束     : ml.Deinit();                                        |
 //+------------------------------------------------------------------+
 #ifndef BQ_MLINPUTS_MQH
 #define BQ_MLINPUTS_MQH
@@ -25,12 +24,13 @@ input bool            InpMLExportCSV  = false;          // 匯出訓練資料 CS
 input bool            InpMLScaleLots  = false;          // 依預估勝率調整手數 (0.5~1.5倍)
 input ENUM_TIMEFRAMES InpMLTimeframe  = PERIOD_CURRENT; // 特徵計算週期
 
-CBQMLFilter g_ml;
-
-bool BQML_Setup(const string eaName,const long magic)
+//--- 每個商品各自一個過濾器 (模型檔名含商品/週期/magic，互不干擾)
+//    baseTF = 該商品的策略週期；InpMLTimeframe=目前週期 時用 baseTF
+bool BQML_Setup(CBQMLFilter &f,const string eaName,const string sym,const ENUM_TIMEFRAMES baseTF,const long magic)
   {
-   ENUM_TIMEFRAMES tf=(InpMLTimeframe==PERIOD_CURRENT ? (ENUM_TIMEFRAMES)_Period : InpMLTimeframe);
-   return(g_ml.Init(eaName,_Symbol,tf,magic,InpMLMode,InpMLThreshold,InpMLMinSamples,
+   ENUM_TIMEFRAMES tf=(InpMLTimeframe==PERIOD_CURRENT ? baseTF : InpMLTimeframe);
+   if(tf==PERIOD_CURRENT) tf=(ENUM_TIMEFRAMES)_Period;
+   return(f.Init(eaName,sym,tf,magic,InpMLMode,InpMLThreshold,InpMLMinSamples,
                     InpMLBarrierTP,InpMLBarrierSL,InpMLMaxBars,
                     InpMLLoadModel,InpMLSaveModel,InpMLExportCSV,InpMLScaleLots));
   }

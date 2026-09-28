@@ -16,6 +16,7 @@
 │      └─ BeeQuant/           共用函式庫 (取代 cash.mqh / cash_v2.mqh)
 │          ├─ BQ_Trade.mqh        下單/平倉/改單/手數計算
 │          ├─ BQ_Indicators.mqh   指標 handle 快取、新K棒判斷、每日計數器
+│          ├─ BQ_Multi.mqh        多商品：商品清單解析、券商後綴對應
 │          ├─ BQ_ML.mqh           機器學習過濾器 (線上邏輯斯迴歸)
 │          └─ BQ_MLInputs.mqh     各 EA 共用的 ML 參數
 ├─ tools/build_single.py      ← 改完 src/ 後執行，重新產生單檔 EA
@@ -32,24 +33,38 @@
 
 檔案都是 UTF-8 (含 BOM)，中文註解在 MetaEditor 可正常顯示。
 
-## EA 對照表
+## EA 對照表（預設交易商品 / 週期）
 
-| 檔案 | 原始檔 | 原開發商品/週期 | 策略類型 |
-|---|---|---|---|
-| 01_Friday_ML | Tester-Friday v1.0 | EURUSD、EURGBP、EURCHF、AUDUSD / D1 | 週末反轉 |
-| 02_MarketReview_ML | MarketReview(非交易EA) | 任意 | 12 種進場 x 3 種出場探測器 |
-| 03_Secret_ML | Tester-Secret v6.0 Input + Live-Secret v7.0 | v7 表內 36 組 | 日區間突破 + MACD |
-| 04_BBFF_ML | Tester-BBFF v2.02 | — | 夜盤布林逆勢 |
-| 05_Kris_ML | Tester-Kris v1.0 | — | 雙均線回檔 |
-| 06_iCOOL_ML | Tester-iCOOL v1.0 | 全商品 (iCOOL全商品.xml) | 大週期布林 + 小週期回檔 |
-| 07_Lucy_ML | Tester-Lucy | EURJPY / H1 | 波動收斂區間 |
-| 08_Spaghetti_ML | Tester-Spaghetti(三關價) | H1 | 三關價突破 |
-| 09_Wellington_ML | Tester-Wellington 威靈頓 | GBPJPY / H1 | 三均線回檔突破 |
-| 10_WeekBullBearPower_ML | Tester-WeekBullBearPower 周天成 | GBPJPY / D1 | 週/日 多空力道 |
-| 11_Jimmy_ML | Tester-Jimmy | GBPJPY / H1 | 均線 + RSI |
-| 12_Ultimate_ML | Tester-Ultimate | GBPCAD、GBPNZD、GBPJPY / M15 | 假突破反轉 |
-| X1_Trendline_ML | Trendline EA MT5 | 手動畫線 | 趨勢線突破/反彈 |
-| X2_FiveMinMomentum_ML | 五分鐘動量交易系統 | — | 均線 + MACD 動量 |
+**掛在任何一張圖表都可以**：EA 依參數 `InpSymbols`（交易商品）與 `InpBaseTF`（策略週期）交易，
+預設值就是原版規則使用的商品與週期，跟圖表是什麼商品、什麼週期無關（圖表只是載體）。
+
+| 檔案 | 原始檔 | 預設 InpSymbols | 預設 InpBaseTF | 策略類型 |
+|---|---|---|---|---|
+| 01_Friday_ML | Tester-Friday v1.0 | EURGBP,EURCHF,AUDUSD,EURUSD | D1 | 週末反轉 |
+| 02_MarketReview_ML | MarketReview(非交易EA) | 空白 = 圖表商品（原版為掃描器，無指定商品） | H1 | 12 種進場 x 3 種出場探測器 |
+| 03_Secret_ML | Tester-Secret v6.0 Input + Live-Secret v7.0 | v7 參數表 15 個商品（共 36 組編號） | H1 | 日區間突破 + MACD |
+| 04_BBFF_ML | Tester-BBFF v2.02 | 空白 = 圖表商品（原版未指定） | 目前 = 圖表週期 | 夜盤布林逆勢 |
+| 05_Kris_ML | Tester-Kris v1.0 | GBPJPY,EURJPY,GBPCHF,EURGBP,EURAUD,USDJPY,AUDUSD | H4 | 雙均線回檔 |
+| 06_iCOOL_ML | Tester-iCOOL v1.0 | iCOOL全商品.xml 的 14 個獲利商品 | M20 | 大週期布林 + 小週期回檔 |
+| 07_Lucy_ML | Tester-Lucy | EURJPY | H1 | 波動收斂區間 |
+| 08_Spaghetti_ML | Tester-Spaghetti(三關價) | 空白 = 圖表商品（原版未指定） | H1 | 三關價突破 |
+| 09_Wellington_ML | Tester-Wellington 威靈頓 | GBPJPY | H1 | 三均線回檔突破 |
+| 10_WeekBullBearPower_ML | Tester-WeekBullBearPower 周天成 | GBPJPY | D1 | 週/日 多空力道 |
+| 11_Jimmy_ML | Tester-Jimmy | GBPJPY | H1 | 均線 + RSI |
+| 12_Ultimate_ML | Tester-Ultimate | GBPCAD,GBPNZD,GBPJPY | M15 | 假突破反轉 |
+| X1_Trendline_ML | Trendline EA MT5 | （圖表商品，趨勢線畫在圖上） | 圖表週期 | 趨勢線突破/反彈 |
+| X2_FiveMinMomentum_ML | 五分鐘動量交易系統 | 空白 = 圖表商品（原版未指定） | H1 | 均線 + MACD 動量 |
+
+### 多商品怎麼運作
+
+- `InpSymbols` 用逗號分隔，例如 `GBPJPY,EURJPY`；留空白 = 圖表商品；寫 `CHART` 也代表圖表商品。
+- 券商商品名稱有後綴/前綴（`GBPJPY.m`、`GBPJPYpro`、`m.GBPJPY`）會自動對應，並自動加入「市場報價」。找不到的商品會在日誌提示並略過。
+- 每個商品是獨立的一組策略：各自的持倉判斷、每日次數、K 棒防重複、ML 模型（模型檔名含商品名稱）。
+- 其他商品不會觸發圖表的 OnTick，所以 EA 另外每秒用 OnTimer 檢查一次所有商品。
+- 同一個 MagicNumber 可以用在多個商品，持倉以「商品 + Magic」區分，舊單也能接手。
+- **Secret**：`InpEAMagicNum = 0`（預設）時，參數表中每個商品的每一組編號都各跑一組（等於原版每組開一張圖），Magic 依原版公式 (編號 + 幣別代碼 + 週期代碼) 計算；填 1、2… 則只跑該編號。
+- **策略測試器**：可以直接測多商品（測試器會自動載入其他商品的歷史資料）。要單獨測一個商品，把 `InpSymbols` 改成那一個商品即可。
+- 預設是「原版規則」的商品，實際交易前請先確認每個商品都回測過；不想跑的商品從清單刪掉即可。
 
 MagicNumber 規則沿用原版（空單 = 多單 + 77；Jimmy 空單 +1；BBFF 多空共用），升級後仍能接手原本 EA 開的單。
 

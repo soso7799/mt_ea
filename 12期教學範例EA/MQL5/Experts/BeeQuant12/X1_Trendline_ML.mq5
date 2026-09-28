@@ -714,12 +714,11 @@ input long   InpMagic      = 168;   // MagicNumber (空單 = +77)
 //==================== 內嵌函式庫：BQ_MLInputs.mqh ====================
 //+------------------------------------------------------------------+
 //|  BQ_MLInputs.mqh — 所有 EA 共用的 ML 參數與全域過濾器物件            |
-//|  EA 只要：                                                         |
-//|     #include <BeeQuant/BQ_MLInputs.mqh>                            |
-//|     OnInit   : BQML_Setup("EA名稱", magic);                        |
-//|     OnTick   : g_ml.OnTick();                                      |
-//|     下單前   : if(!g_ml.Allow(方向, 停損距離, 停利距離)) 不下單     |
-//|     OnDeinit : g_ml.Deinit();                                      |
+//|  EA 只要 (每個商品一個 CBQMLFilter 物件 ml)：                        |
+//|     初始化   : BQML_Setup(ml,"EA名稱",商品,週期,magic);             |
+//|     每個 tick: ml.OnTick();                                        |
+//|     下單前   : if(!ml.Allow(方向, 停損距離, 停利距離)) 不下單       |
+//|     結束     : ml.Deinit();                                        |
 //+------------------------------------------------------------------+
 #ifndef BQ_MLINPUTS_MQH
 #define BQ_MLINPUTS_MQH
@@ -1118,9 +1117,9 @@ public:
       m_feat.Init(sym,tf);
 
       if(load && m_model.Load(m_file))
-         PrintFormat("BQ_ML: 已載入模型 %s (已學習 %I64d 筆)",m_file,m_model.updates);
+         PrintFormat("[%s] BQ_ML: 已載入模型 %s (已學習 %I64d 筆)",m_sym,m_file,m_model.updates);
       else
-         PrintFormat("BQ_ML: 使用新模型，前 %d 個訊號不過濾 (暖機)",m_minSamples);
+         PrintFormat("[%s] BQ_ML: 使用新模型，前 %d 個訊號不過濾 (暖機)",m_sym,m_minSamples);
 
       m_csv=INVALID_HANDLE;
       if(exportCsv && !opt)
@@ -1136,7 +1135,7 @@ public:
                       BQML_FeatureName(3),BQML_FeatureName(4),BQML_FeatureName(5),BQML_FeatureName(6),
                       BQML_FeatureName(7),BQML_FeatureName(8),BQML_FeatureName(9),BQML_FeatureName(10),
                       BQML_FeatureName(11),"label");
-            PrintFormat("BQ_ML: 訓練資料輸出至 Common\\Files\\%s",cf);
+            PrintFormat("[%s] BQ_ML: 訓練資料輸出至 Common\\Files\\%s",m_sym,cf);
            }
         }
       return(true);
@@ -1207,7 +1206,7 @@ public:
       m_sigBar[k]=bar;
       m_sigDecision[k]=ok;
       if(!ok && !MQLInfoInteger(MQL_OPTIMIZATION))
-         PrintFormat("BQ_ML: 擋掉%s訊號 預估勝率 %.3f < 兩平 %.3f + 優勢 %.2f",(dir>0 ? "多單" : "空單"),p,be,m_thr);
+         PrintFormat("[%s] BQ_ML: 擋掉%s訊號 預估勝率 %.3f < 兩平 %.3f + 優勢 %.2f",m_sym,(dir>0 ? "多單" : "空單"),p,be,m_thr);
       return(ok);
      }
 
@@ -1271,7 +1270,7 @@ public:
       if(m_save && m_model.updates>0)
         {
          if(m_model.Save(m_file))
-            PrintFormat("BQ_ML: 模型已儲存 Common\\Files\\%s",m_file);
+            PrintFormat("[%s] BQ_ML: 模型已儲存 Common\\Files\\%s",m_sym,m_file);
         }
       if(m_csv!=INVALID_HANDLE)
         {
@@ -1280,17 +1279,17 @@ public:
         }
       if(!MQLInfoInteger(MQL_OPTIMIZATION))
         {
-         PrintFormat("BQ_ML 統計: 訊號 %d | 放行 %d | 擋掉 %d | 已標記 %d (勝 %d, %.1f%%)",
+         PrintFormat("[%s] BQ_ML 統計: 訊號 %d | 放行 %d | 擋掉 %d | 已標記 %d (勝 %d, %.1f%%)",m_sym,
                      m_signals,m_allowed,m_blocked,m_resolved,m_wins,
                      (m_resolved>0 ? 100.0*m_wins/m_resolved : 0.0));
          if(m_allowedN>0 || m_blockedN>0)
-            PrintFormat("BQ_ML 過濾效果: 放行單勝率 %.1f%% (%d 筆) vs 擋掉單勝率 %.1f%% (%d 筆)",
+            PrintFormat("[%s] BQ_ML 過濾效果: 放行單勝率 %.1f%% (%d 筆) vs 擋掉單勝率 %.1f%% (%d 筆)",m_sym,
                         (m_allowedN>0 ? 100.0*m_allowedWins/m_allowedN : 0.0),m_allowedN,
                         (m_blockedN>0 ? 100.0*m_blockedWins/m_blockedN : 0.0),m_blockedN);
          if(m_scoredN>0)
-            PrintFormat("BQ_ML 暖機後預測準確率: %.1f%% (%d 筆)",100.0*m_correct/m_scoredN,m_scoredN);
+            PrintFormat("[%s] BQ_ML 暖機後預測準確率: %.1f%% (%d 筆)",m_sym,100.0*m_correct/m_scoredN,m_scoredN);
          for(int i=0;i<BQML_NF;i++)
-            PrintFormat("BQ_ML 權重 %-16s %+.4f",BQML_FeatureName(i),m_model.w[i]);
+            PrintFormat("[%s] BQ_ML 權重 %-16s %+.4f",m_sym,BQML_FeatureName(i),m_model.w[i]);
         }
      }
   };
@@ -1313,12 +1312,13 @@ input bool            InpMLExportCSV  = false;          // 匯出訓練資料 CS
 input bool            InpMLScaleLots  = false;          // 依預估勝率調整手數 (0.5~1.5倍)
 input ENUM_TIMEFRAMES InpMLTimeframe  = PERIOD_CURRENT; // 特徵計算週期
 
-CBQMLFilter g_ml;
-
-bool BQML_Setup(const string eaName,const long magic)
+//--- 每個商品各自一個過濾器 (模型檔名含商品/週期/magic，互不干擾)
+//    baseTF = 該商品的策略週期；InpMLTimeframe=目前週期 時用 baseTF
+bool BQML_Setup(CBQMLFilter &f,const string eaName,const string sym,const ENUM_TIMEFRAMES baseTF,const long magic)
   {
-   ENUM_TIMEFRAMES tf=(InpMLTimeframe==PERIOD_CURRENT ? (ENUM_TIMEFRAMES)_Period : InpMLTimeframe);
-   return(g_ml.Init(eaName,_Symbol,tf,magic,InpMLMode,InpMLThreshold,InpMLMinSamples,
+   ENUM_TIMEFRAMES tf=(InpMLTimeframe==PERIOD_CURRENT ? baseTF : InpMLTimeframe);
+   if(tf==PERIOD_CURRENT) tf=(ENUM_TIMEFRAMES)_Period;
+   return(f.Init(eaName,sym,tf,magic,InpMLMode,InpMLThreshold,InpMLMinSamples,
                     InpMLBarrierTP,InpMLBarrierSL,InpMLMaxBars,
                     InpMLLoadModel,InpMLSaveModel,InpMLExportCSV,InpMLScaleLots));
   }
@@ -1331,6 +1331,7 @@ bool BQML_Setup(const string eaName,const long magic)
 CBQTrade        g_trade;
 CBQBarGuard     g_guardBuy,g_guardSell;
 CBQDailyCounter g_daily;
+CBQMLFilter     g_ml;      // 趨勢線是畫在圖表上的，所以此 EA 仍以圖表商品/週期交易
 
 //--- 取指定顏色的第一條趨勢線在目前時間的價位，沒有回傳 0
 double LineValue(const color clr)
@@ -1350,7 +1351,7 @@ int OnInit()
   {
    g_trade.Init(_Symbol,InpMagic,InpMagic+77,InpSlippage);
    g_daily.Init(InpDayReset);
-   BQML_Setup("Trendline",InpMagic);
+   BQML_Setup(g_ml,"Trendline",_Symbol,(ENUM_TIMEFRAMES)_Period,InpMagic);
    return(INIT_SUCCEEDED);
   }
 

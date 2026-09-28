@@ -47,6 +47,7 @@ input long   InpMagic      = 168;   // MagicNumber (空單 = +77)
 CBQTrade        g_trade;
 CBQBarGuard     g_guardBuy,g_guardSell;
 CBQDailyCounter g_daily;
+CBQMLFilter     g_ml;      // 趨勢線是畫在圖表上的，所以此 EA 仍以圖表商品/週期交易
 
 //--- 取指定顏色的第一條趨勢線在目前時間的價位，沒有回傳 0
 double LineValue(const color clr)
@@ -66,7 +67,7 @@ int OnInit()
   {
    g_trade.Init(_Symbol,InpMagic,InpMagic+77,InpSlippage);
    g_daily.Init(InpDayReset);
-   BQML_Setup("Trendline",InpMagic);
+   BQML_Setup(g_ml,"Trendline",_Symbol,(ENUM_TIMEFRAMES)_Period,InpMagic);
    return(INIT_SUCCEEDED);
   }
 
