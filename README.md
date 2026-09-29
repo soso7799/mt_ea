@@ -6,8 +6,8 @@
 ## 安裝
 
 1. MT5 →「檔案」→「開啟資料資料夾」→ 進入 `MQL5\Experts\`，建立資料夾 `MultiCurrency`。
-2. 把 `MultiCurrency_EA.mq5` 和全部 6 個 `.mqh` 放進 **同一個** `MQL5\Experts\MultiCurrency\`：
-   `FilterLib_v5.mqh`、`CandlePatterns.mqh`、`BQ_ML.mqh`、`BQ_Indicators.mqh`、`MarketRegime.mqh`、`NewsFilter.mqh`
+2. 把 `MultiCurrency_EA.mq5` 和全部 7 個 `.mqh` 放進 **同一個** `MQL5\Experts\MultiCurrency\`：
+   `FilterLib_v5.mqh`、`CandlePatterns.mqh`、`BQ_ML.mqh`、`BQ_Indicators.mqh`、`MarketRegime.mqh`、`NewsFilter.mqh`、`SymbolGroups.mqh`
    （EA 用引號 `#include "..."` 從自己的資料夾讀取，**不需要**放到 `MQL5\Include`；Include 裡舊的 FilterLib 不會被用到）
 3. MetaEditor 開啟 `MultiCurrency_EA.mq5`，按 **F7** 編譯。
 4. 掛到任一圖表。啟動日誌會印出模式、風控金額、排程對照（冬令/夏令）與可交易商品數。

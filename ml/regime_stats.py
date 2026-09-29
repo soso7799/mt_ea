@@ -33,6 +33,14 @@ from collections import defaultdict
 
 HORIZONS = (1, 4, 24)
 
+GROUP_NAMES = {"major": "主要貨幣", "cross": "交叉貨幣", "exotic": "異國貨幣", "metal": "金屬",
+               "energy": "能源", "index": "指數", "agri": "農產品", "crypto": "加密貨幣", "other": "其他"}
+GROUP_ORDER = list(GROUP_NAMES)
+
+
+def group_of(r):
+    return (r.get("group") or "other").strip() or "other"
+
 
 def default_dir():
     appdata = os.environ.get("APPDATA", "")
@@ -188,6 +196,7 @@ def main():
     by_group = defaultdict(Acc)
     by_zone = defaultdict(Acc)
     aligned, counter, all_long, all_short = Acc(), Acc(), Acc(), Acc()
+    grp_all, grp_aligned, grp_counter = defaultdict(Acc), defaultdict(Acc), defaultdict(Acc)
     for rows in data.values():
         for i, r in enumerate(rows):
             reg = regime_name(r)
@@ -197,10 +206,14 @@ def main():
                     continue
                 by_group[(name, reg)].add(res)
                 (all_long if d > 0 else all_short).add(res)
+                g = group_of(r)
+                grp_all[g].add(res)
                 if (reg == "多頭" and d > 0) or (reg == "空頭" and d < 0):
                     aligned.add(res)
+                    grp_aligned[g].add(res)
                 elif reg != "盤整":
                     counter.add(res)
+                    grp_counter[g].add(res)
                 zone = r.get("fib_zone", "")
                 by_zone[(name, zone)].add(res)
 
@@ -240,6 +253,25 @@ def main():
                 print(f"  {label}  {h:>2} 根後  {len(v):>5} 筆  平均 {sum(v)/len(v):+.3f} ATR  正確 {ok:5.1f}%")
             else:
                 print(f"  {label}  {h:>2} 根後      0 筆")
+
+    # ---------- 5. 依商品分組 ----------
+    print("\n" + "=" * 78)
+    print("5. 依商品分組（主要貨幣 / 交叉貨幣 / 異國貨幣 / 金屬 / 能源 / 指數 / 農產品 / 加密）")
+    print("=" * 78)
+    counts = defaultdict(int)
+    syms = defaultdict(set)
+    for s_, rows in data.items():
+        for r in rows:
+            counts[group_of(r)] += 1
+            syms[group_of(r)].add(s_)
+    for g in GROUP_ORDER + sorted(k for k in counts if k not in GROUP_ORDER):
+        if counts.get(g, 0) == 0:
+            continue
+        name = GROUP_NAMES.get(g, g)
+        print(f"\n  【{name}】 {counts[g]} 筆判定  商品：{', '.join(sorted(syms[g]))}")
+        print("  " + grp_all[g].row("全部斐波模擬").strip())
+        print("  " + grp_aligned[g].row("順勢").strip())
+        print("  " + grp_counter[g].row("逆勢").strip())
 
     print("\n說明：平均報酬 > 0R 且筆數夠多（建議 >100）的組合才代表有優勢；")
     print("      若「順勢」明顯優於「逆勢」，可把 Inp_MR_Mode 改為 順勢 過濾。")

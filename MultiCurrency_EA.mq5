@@ -56,6 +56,7 @@
 #include "BQ_ML.mqh"
 #include "MarketRegime.mqh"
 #include "NewsFilter.mqh"
+#include "SymbolGroups.mqh"
 
 input group "=== Basic ==="
 input bool Inp_TradeEnabled = false; // 允許下單（false = 只統計：不開倉、不平倉、不改單，只計算並記錄）
@@ -214,6 +215,7 @@ int      mrCsv=INVALID_HANDLE;   // 每個商品一個 ML 模型（模型檔名�
 int weight[IND_COUNT] = {3,2,1,2,1};
 
 string   symbols[SYM_COUNT];
+ENUM_SYM_GROUP symGroup[SYM_COUNT];   // 商品分組（主要貨幣/交叉貨幣/異國貨幣/金屬/能源/指數/農產品/加密）
 bool     symOk[SYM_COUNT];      // 券商有此商品且指標建立成功
 datetime lastBarTime[SYM_COUNT];
 int startIndex=0;
@@ -419,7 +421,7 @@ void OpenRegimeCsv()
                 "ma_align","ma34_side","ma34_slope","macd_side","macd_cross","rsi3","rsi6","rsi_signal",
                 "dev_atr","vol_ratio","swing_hi","swing_lo","swing_dir","fib_ratio",
                 "fib236","fib382","fib500","fib618","fib786","support","resistance","fib_zone","patterns",
-                "long_sl","long_tp","long_rr","short_sl","short_tp","short_rr","high","low","atr");
+                "long_sl","long_tp","long_rr","short_sl","short_tp","short_rr","high","low","atr","group");
    PrintFormat("行情判定寫入 Common\\Files\\%s",f);
 }
 
@@ -456,7 +458,8 @@ void UpdateRegimes()
                    DoubleToString(mr[i].support,dg),DoubleToString(mr[i].resistance,dg),mr[i].fibZone,pat,
                    DoubleToString(mr[i].longSL,dg),DoubleToString(mr[i].longTP,dg),DoubleToString(mr[i].longRR,2),
                    DoubleToString(mr[i].shortSL,dg),DoubleToString(mr[i].shortTP,dg),DoubleToString(mr[i].shortRR,2),
-                   DoubleToString(mr[i].barHigh,dg),DoubleToString(mr[i].barLow,dg),DoubleToString(mr[i].atr,dg));
+                   DoubleToString(mr[i].barHigh,dg),DoubleToString(mr[i].barLow,dg),DoubleToString(mr[i].atr,dg),
+                   GroupCode(symGroup[i]));
          FileFlush(mrCsv);
       }
    }
@@ -474,6 +477,26 @@ void LogSchedule()
                srvUtc/3600.0, MQLInfoInteger(MQL_TESTER) ? "（回測）" : (srvUtc>=3*3600 ? "（夏令）" : "（冬令）"),
                Inp_ScheduleOffset, Inp_ForceCloseHour, Inp_ForceCloseMin,
                srvMin/60, srvMin%60, locMin/60, locMin%60);
+}
+
+// 依分組列出商品，例如「主要貨幣: USDJPY / AUDUSD …」；onlyOk=true 只列可交易的商品
+string GroupedSymbolList(bool onlyOk)
+{
+   string out="";
+   for(int g=0;g<GRP_COUNT;g++)
+   {
+      string line="";
+      for(int i=0;i<SYM_COUNT;i++)
+      {
+         if((int)symGroup[i]!=g) continue;
+         if(onlyOk && !symOk[i]) continue;
+         string nm=(symbols[i]!="" ? symbols[i] : "(找不到)");
+         line+=(line=="" ? "" : " / ")+nm;
+      }
+      if(line!="")
+         out+="  "+GroupName((ENUM_SYM_GROUP)g)+": "+line+"\n";
+   }
+   return out;
 }
 
 void ReleaseHandles(int i)
@@ -555,6 +578,7 @@ int OnInit()
    for(int i=0;i<SYM_COUNT;i++)
    {
       symbols[i]=ResolveSymbol(want[i]);
+      symGroup[i]=SymbolGroup(symbols[i]!="" ? symbols[i] : want[i]);
       if(symbols[i]!="" && symbols[i]!=want[i])
          PrintFormat("商品 %s → 券商名稱 %s",want[i],symbols[i]);
    }
@@ -623,6 +647,8 @@ int OnInit()
 
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
+
+   Print("商品分組：\n"+GroupedSymbolList(false));
 
    PrintFormat("EA v5.9 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
@@ -1156,7 +1182,6 @@ void RunCycle()
       return;
 
    string posInfo="";
-   string symList="";
    string cpInfo="";
    string mlInfo="";
    string mrInfo="";
@@ -1166,7 +1191,6 @@ void RunCycle()
       if(!symOk[i]) continue;
       if(newsReason[i]!="") newsInfo+="  ⛔ "+symbols[i]+" "+newsReason[i]+"\n";
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
-      symList+=(symList=="" ? "" : "/")+symbols[i];
       if(cpNames[i]!="") cpInfo+=symbols[i]+": "+cpNames[i]+"\n";
       if(mr[i].valid)
          mrInfo+=StringFormat("%s %s(%+d) %s S=%.*f R=%.*f\n",symbols[i],mr[i].label,mr[i].score,mr[i].fibZone,
@@ -1181,7 +1205,7 @@ void RunCycle()
    Comment(
       "MultiCurrency EA v5.9  週期="+EnumToString(g_tf)+(Inp_TradeEnabled ? "  ⚠️ 交易模式" : "  📝 只統計（不下單）")+"\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
-      symList+"\n",
+      GroupedSymbolList(true),
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
       "K線型態("+EnumToString(Inp_CP_Mode)+"):\n"+(cpInfo=="" ? "  無\n" : cpInfo),
       "ML("+EnumToString(Inp_ML_Mode)+"): "+(mlInfo=="" ? "關閉" : mlInfo)+"\n",
