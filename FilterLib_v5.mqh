@@ -341,6 +341,7 @@ private:
 
    bool _closeTicket(ulong ticket, string sym)
    {
+      if(!TradingEnabled) return false;   // 只統計模式：絕不平倉
       trade.SetTypeFillingBySymbol(sym);
       trade.PositionClose(ticket);
       return _resultOK(sym, "平倉");
@@ -563,6 +564,9 @@ public:
    // v4 公開參數
    //-----------------------------------------------------------------
    // 目前在新聞時段的商品，格式 ";USDJPY;EURUSD;"（由 EA 每個循環更新）
+   // false = 只統計模式：OpenMarket 不下單、不平倉、不改單、不做持倉管理
+   bool   TradingEnabled;
+
    string NewsBlocked;
    bool   IsNewsBlocked(string sym) { return StringFind(NewsBlocked, ";" + sym + ";") >= 0; }
 
@@ -673,6 +677,7 @@ public:
       lastResetDay     = 0;
       forceClosedToday = false;
       NewsBlocked      = "";
+      TradingEnabled   = true;
 
       InitRules();
 
@@ -818,6 +823,11 @@ public:
 
    bool OpenMarket(string sym, int direction, double lots, double sl, double tp, string cmt)
    {
+      if(!TradingEnabled)
+      {
+         PrintFormat("📝 [只統計] %s %s 不下單", sym, direction > 0 ? "BUY" : "SELL");
+         return false;
+      }
       bool isBuy = (direction > 0);
       lots = NormalizeLots(sym, lots);
 
@@ -1049,6 +1059,8 @@ public:
 
    void MonitorPositions()
    {
+      if(!TradingEnabled) return;   // 只統計模式：不動任何持倉
+
       CheckDailyReset();
       CheckForceClose();
 

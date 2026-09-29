@@ -46,6 +46,7 @@
 //   * 高影響新聞前後不開倉、不主動平倉（可選新聞前先平倉）；週五 22:30（伺服器時間）平倉不留週末
 //   * 冬令/夏令自動調整：所有每日排程改以 FTMO 伺服器時間 + Inp_ScheduleOffset(6) 計算，
 //     設定值維持冬令台灣時間（05:45、07:15…），夏令時自動提早 1 小時
+//   * Inp_TradeEnabled（預設 false = 只統計）：不開倉、不平倉、不改單，訊號只寫入日誌
 //------------------------------------------------------------------+
 #property version "5.90"
 #include <FilterLib_v5.mqh>
@@ -55,6 +56,7 @@
 #include <NewsFilter.mqh>
 
 input group "=== Basic ==="
+input bool Inp_TradeEnabled = false; // 允許下單（false = 只統計：不開倉、不平倉、不改單，只計算並記錄）
 input ENUM_TIMEFRAMES Inp_TF = PERIOD_M12; // 策略週期（進場/追蹤停損/反向平倉/型態/ML 共用）
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
@@ -251,6 +253,7 @@ int GetPattern(int si)
 // 持倉出現反向K線型態時主動平倉
 void CheckPatternExit()
 {
+   if(!Inp_TradeEnabled) return;
    if(Inp_CP_Mode==CP_OFF || !Inp_CP_ExitOnReverse) return;
 
    for(int si=0;si<SYM_COUNT;si++)
@@ -521,6 +524,12 @@ int OnInit()
    mreg.MinSLATR    =Inp_MR_MinSLATR;
    mreg.MaxSLATR    =Inp_MR_MaxSLATR;
    mreg.MinRR       =Inp_MR_MinRR;
+
+   filter.TradingEnabled=Inp_TradeEnabled;
+   if(!Inp_TradeEnabled)
+      Print("📝 只統計模式：EA 不會開倉、平倉或改單；訊號、行情判定、ML 虛擬單照常計算並記錄");
+   else
+      Print("⚠️ 交易模式：EA 會實際下單");
 
    filter.ScheduleOffsetHours=Inp_ScheduleOffset;
    filter.ForceCloseHour=Inp_ForceCloseHour;
@@ -1021,6 +1030,17 @@ void TryOpenPositions()
       tp=ftp;
    }
 
+   // 只統計模式：記錄「本來會下的單」，不送單；這根K棒標記為已處理，下一個有訊號的商品才輪得到
+   if(!Inp_TradeEnabled)
+   {
+      int dg=(int)SymbolInfoInteger(sym,SYMBOL_DIGITS);
+      PrintFormat("📝 [只統計] 訊號 %s %s  價 %.*f  SL %.*f  TP %.*f  lot %.2f  分數 %d%s",
+                  sym, sig>0 ? "BUY" : "SELL", dg, px, dg, sl, dg, tp, lot, confArr[bestIndex],
+                  cpNames[bestIndex]=="" ? "" : "  型態 "+cpNames[bestIndex]);
+      MarkBarUsed(bestIndex);
+      return;
+   }
+
    // 成交模式、手數步進、最小停損距離、retcode 檢查與重試都在 OpenMarket 處理，失敗原因會印在日誌
    if(filter.OpenMarket(sym, sig, lot, sl, tp, sig>0 ? "MC BUY" : "MC SELL"))
       MarkBarUsed(bestIndex);
@@ -1031,6 +1051,7 @@ void TryOpenPositions()
 //------------------------------------------------------------------
 void ClosePositionsOf(const string sym,const string reason)
 {
+   if(!Inp_TradeEnabled) return;
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
@@ -1068,7 +1089,7 @@ void UpdateNews()
          }
 
          // 新聞前提早平倉（在禁止成交的時段開始之前）
-         if(Inp_News_ClosePreMin>0 && HasPos(symbols[i]) && news.InWindow(symbols[i],why,Inp_News_ClosePreMin))
+         if(Inp_TradeEnabled && Inp_News_ClosePreMin>0 && HasPos(symbols[i]) && news.InWindow(symbols[i],why,Inp_News_ClosePreMin))
             ClosePositionsOf(symbols[i],"新聞前平倉 "+why);
       }
    }
@@ -1089,6 +1110,7 @@ bool FridayNoEntry()
 
 void CheckFridayClose()
 {
+   if(!Inp_TradeEnabled) return;
    if(!Inp_Fri_Enable || CountPos()==0) return;
    MqlDateTime t;
    TimeToStruct(TimeTradeServer(),t);
@@ -1113,9 +1135,13 @@ void RunCycle()
    UpdateRegimes();
    UpdateNews();
 
-   filter.MonitorPositions();
-   CheckFridayClose();
-   CheckPatternExit();
+   // 只統計模式不做任何持倉管理（強平、追蹤停損、反向平倉、週五平倉）
+   if(Inp_TradeEnabled)
+   {
+      filter.MonitorPositions();
+      CheckFridayClose();
+      CheckPatternExit();
+   }
    if(!FridayNoEntry())
       TryOpenPositions();
 
@@ -1147,7 +1173,7 @@ void RunCycle()
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.9  週期="+EnumToString(g_tf)+"\n",
+      "MultiCurrency EA v5.9  週期="+EnumToString(g_tf)+(Inp_TradeEnabled ? "  ⚠️ 交易模式" : "  📝 只統計（不下單）")+"\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
