@@ -14,10 +14,17 @@
 //  v5.4  K線型態濾網（CandlePatterns.mqh：翻多16招 + 翻空18招）
 //   * Inp_CP_Mode：關閉 / 反向型態擋單 / 必須同向型態 / 當第6個指標加權
 //   * Inp_CP_ExitOnReverse：持倉出現反向型態時主動平倉
+//
+//  v5.5  機器學習訊號過濾（移植 BeeQuant12 BQ_ML.mqh）
+//   * 每個商品一個線上邏輯斯迴歸模型，估計訊號「先到停利」的機率
+//   * 機率 >= 兩平勝率 + Inp_ML_Threshold 才放行；前 Inp_ML_MinSamples 個訊號只學習不過濾
+//   * 每個訊號（含被擋掉、沒被選中的）都建立虛擬單追蹤標記，避免選擇偏誤
+//   * 模型存在 Common\Files\BeeQuantML\，可匯出 CSV 用 ml/train_logit.py 離線訓練
 //------------------------------------------------------------------+
-#property version "5.40"
+#property version "5.50"
 #include <FilterLib_v5.mqh>
 #include <CandlePatterns.mqh>
+#include <BQ_ML.mqh>
 
 input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
@@ -42,6 +49,19 @@ input double          Inp_CP_SmallATR      = 0.35;       // 小K 實體 <= ATR�
 input double          Inp_CP_DojiATR       = 0.12;       // 十字/變盤線 實體 <= ATR倍數
 input double          Inp_CP_NearATR       = 0.15;       // 「相近」容許誤差（ATR倍數）
 input string          Inp_CP_Disable       = "";         // 停用的型態代碼，例如 B5,S7
+
+input group "=== 機器學習 (ML) 訊號過濾 ==="
+input ENUM_BQML_MODE  Inp_ML_Mode       = BQML_FILTER; // ML 模式
+input double          Inp_ML_Threshold  = 0.03;        // 放行門檻：預估勝率需高於兩平勝率多少
+input int             Inp_ML_MinSamples = 40;          // 暖機樣本數（之前不過濾）
+input double          Inp_ML_BarrierTP  = 0;           // 標記用停利 ATR 倍數（0=用 fx_rules 停利）
+input double          Inp_ML_BarrierSL  = 0;           // 標記用停損 ATR 倍數（0=用 fx_rules 停損）
+input int             Inp_ML_MaxBars    = 48;          // 虛擬單最長追蹤 K 棒數
+input bool            Inp_ML_LoadModel  = true;        // 啟動時載入已存模型
+input bool            Inp_ML_SaveModel  = true;        // 結束時儲存模型
+input bool            Inp_ML_ExportCSV  = false;       // 匯出訓練資料 CSV（給 ml/train_logit.py）
+input bool            Inp_ML_ScaleLots  = false;       // 依預估優勢調整手數（0.5~1.5倍）
+input ENUM_TIMEFRAMES Inp_ML_TF         = PERIOD_M12;  // 特徵計算週期（建議與策略週期 M12 相同）
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -107,6 +127,7 @@ CTrade         trade;
 CCandlePatterns cp;
 
 #define SYM_COUNT 7
+CBQMLFilter ml[SYM_COUNT];   // 每個商品一個 ML 模型（模型檔名含商品名稱，互不干擾）
 #define IND_COUNT 5
 int weight[IND_COUNT] = {3,2,1,2,1};
 
@@ -319,6 +340,8 @@ int OnInit()
    cp.ConfirmAll=Inp_CP_ConfirmAll;
    cp.SetDisabled(Inp_CP_Disable);
 
+   ENUM_TIMEFRAMES mlTF=(Inp_ML_TF==PERIOD_CURRENT ? PERIOD_M12 : Inp_ML_TF);
+
    if(!filter.InitIndicators())
       return INIT_FAILED;
 
@@ -380,6 +403,10 @@ int OnInit()
 
       symOk[i]=true;
       okCount++;
+
+      ml[i].Init("MultiCurrency",s,mlTF,Inp_Magic,Inp_ML_Mode,Inp_ML_Threshold,Inp_ML_MinSamples,
+                 Inp_ML_BarrierTP,Inp_ML_BarrierSL,Inp_ML_MaxBars,
+                 Inp_ML_LoadModel,Inp_ML_SaveModel,Inp_ML_ExportCSV,Inp_ML_ScaleLots);
    }
 
    if(okCount==0)
@@ -391,13 +418,19 @@ int OnInit()
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
 
-   PrintFormat("EA v5.4 started（%d/%d 個商品可交易）",okCount,SYM_COUNT);
+   PrintFormat("EA v5.5 started（%d/%d 個商品可交易）",okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+
+   // 儲存模型並印出「放行單勝率 vs 擋掉單勝率」與各特徵權重
+   for(int i=0;i<SYM_COUNT;i++)
+      if(symOk[i]) ml[i].Deinit();
+   BQ_ReleaseIndicators();
+
    filter.DeinitIndicators();
    cp.Release();
 
@@ -694,6 +727,19 @@ void TryOpenPositions()
 
       GetSignalWithConfirm(i,sig,confirm);
 
+      // ML 過濾：每個訊號（不論最後有沒有被選中下單）都會建立虛擬單學習；
+      // 同一根K棒同方向重複詢問會回傳第一次的結果，不會重複建立
+      if(sig!=0 && Inp_ML_Mode!=BQML_OFF)
+      {
+         double slD=0, tpD=0;
+         filter.GetStopDistances(symbols[i], slD, tpD);
+         if(!ml[i].Allow(sig, slD, tpD))
+         {
+            sig=0;
+            confirm=0;
+         }
+      }
+
       sigArr[i]  = sig;
       confArr[i] = confirm;
    }
@@ -730,7 +776,7 @@ void TryOpenPositions()
 
    if(!filter.AllowTrading(sym, sig, sl, tp))
       return;
-   double lot = filter.GetLotSize(sym);
+   double lot = filter.GetLotSize(sym) * ml[bestIndex].LotFactor();
 
    // 成交模式、手數步進、最小停損距離、retcode 檢查與重試都在 OpenMarket 處理，失敗原因會印在日誌
    if(filter.OpenMarket(sym, sig, lot, sl, tp, sig>0 ? "MC BUY" : "MC SELL"))
@@ -740,6 +786,10 @@ void TryOpenPositions()
 //------------------------------------------------------------------
 void RunCycle()
 {
+   // 推進各商品的 ML 虛擬單（先到停利=1 / 先到停損=0），並即時更新模型
+   for(int i=0;i<SYM_COUNT;i++)
+      if(symOk[i]) ml[i].OnTick();
+
    filter.MonitorPositions();
    CheckPatternExit();
    TryOpenPositions();
@@ -751,23 +801,26 @@ void RunCycle()
    string posInfo="";
    string symList="";
    string cpInfo="";
+   string mlInfo="";
    for(int i=0;i<SYM_COUNT;i++)
    {
       if(!symOk[i]) continue;
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
       symList+=(symList=="" ? "" : "/")+symbols[i];
       if(cpNames[i]!="") cpInfo+=symbols[i]+": "+cpNames[i]+"\n";
+      if(Inp_ML_Mode!=BQML_OFF) mlInfo+=StringFormat("%s p=%.2f  ",symbols[i],ml[i].LastProb());
    }
    string reportSym=Inp_Sym1;
    for(int i=0;i<SYM_COUNT;i++)
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.4\n",
+      "MultiCurrency EA v5.5\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
-      "K線型態("+EnumToString(Inp_CP_Mode)+"):\n"+(cpInfo=="" ? "  無\n" : cpInfo)+"\n",
+      "K線型態("+EnumToString(Inp_CP_Mode)+"):\n"+(cpInfo=="" ? "  無\n" : cpInfo),
+      "ML("+EnumToString(Inp_ML_Mode)+"): "+(mlInfo=="" ? "關閉" : mlInfo)+"\n\n",
       filter.GetStatusReport(reportSym)
    );
 }

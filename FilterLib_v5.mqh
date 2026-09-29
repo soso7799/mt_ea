@@ -731,6 +731,17 @@ public:
    //-----------------------------------------------------------------
    // v4 公開方法
    //-----------------------------------------------------------------
+   // 該商品規則的停損/停利距離（價格單位），供 ML 虛擬單標記使用；無規則回傳 false
+   bool GetStopDistances(string sym, double &slDist, double &tpDist)
+   {
+      int idx = FindRule(sym);
+      if(idx < 0) { slDist = 0; tpDist = 0; return false; }
+      double pip = PipSize(sym);
+      slDist = fx_rules[idx].sl_pips * pip;
+      tpDist = fx_rules[idx].tp_pips * pip;
+      return true;
+   }
+
    double GetLotSize(string sym)
    {
       int idx = FindRule(sym);
