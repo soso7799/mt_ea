@@ -51,6 +51,11 @@ input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
 
+input group "=== FTMO 風控（預設值與原本寫死的 -$350 / $9600 相同）==="
+input double Inp_AccountSize  = 10000; // FTMO 帳戶初始資金（10000/25000/50000/100000/200000）
+input double Inp_DailyLossPct = 3.5;   // 每日虧損上限 %（FTMO 規定 5%，含浮動損益；留緩衝）
+input double Inp_MaxLossPct   = 4.0;   // 總虧損上限 %（FTMO 規定 10%，淨值低於 初始×(1-%) 全平鎖日）
+
 input group "=== Account Protection ==="
 input bool Inp_AllowReal   = true; // 允許在真實帳戶執行（false = 只在模擬帳戶執行）
 input long Inp_LockAccount = 0;    // 只允許此帳號執行（0 = 不限）
@@ -449,6 +454,15 @@ int OnInit()
    g_tf  =(Inp_TF==PERIOD_CURRENT ? (ENUM_TIMEFRAMES)_Period : Inp_TF);
    g_cpTF=(Inp_CP_TF==PERIOD_CURRENT ? g_tf : Inp_CP_TF);
    filter.SetTimeframe(g_tf);
+
+   // FTMO 風控：依帳戶大小換算金額
+   filter.DayLossLimit       = -Inp_AccountSize * Inp_DailyLossPct / 100.0;
+   filter.AccountEquityFloor =  Inp_AccountSize * (1.0 - Inp_MaxLossPct / 100.0);
+   PrintFormat("風控：每日虧損上限 $%.0f（%.1f%%），淨值下限 $%.0f（-%.1f%%），伺服器時差 %+.1f 小時",
+               filter.DayLossLimit, Inp_DailyLossPct, filter.AccountEquityFloor, Inp_MaxLossPct,
+               (double)((long)(TimeLocal()-TimeTradeServer()))/3600.0);
+   if(Inp_DailyLossPct>=5.0 || Inp_MaxLossPct>=10.0)
+      Print("⚠️ 風控上限已達或超過 FTMO 規定（每日 5% / 總計 10%），沒有任何緩衝");
 
    cp.TrendBars =Inp_CP_TrendBars;
    cp.TrendATR  =Inp_CP_TrendATR;

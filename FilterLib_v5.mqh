@@ -343,6 +343,21 @@ private:
       return -1;
    }
 
+   // 本機時間 - 伺服器時間（四捨五入到 15 分鐘）。成交歷史是伺服器時間，
+   // 交易日起點（TradingStartHour，本機時間）要換算後才能拿去 HistorySelect
+   long ServerOffset()
+   {
+      long off = (long)(TimeLocal() - TimeTradeServer());
+      return (long)MathRound(off / 900.0) * 900;
+   }
+
+   // 今日（本機 TradingStart 起）成交歷史，以伺服器時間查詢
+   bool SelectTodayHistory()
+   {
+      datetime from = (datetime)((long)GetTradingDayStart() - ServerOffset());
+      return HistorySelect(from, TimeTradeServer() + 60);
+   }
+
    datetime GetTradingDayStart()
    {
       MqlDateTime t = LocalNow();
@@ -430,7 +445,7 @@ private:
    int GetSymbolStopLossCount(string sym)
    {
       int cnt = 0;
-      HistorySelect(GetTradingDayStart(), TimeLocal());
+      SelectTodayHistory();
 
       for(int i=HistoryDealsTotal()-1; i>=0; i--)
       {
@@ -451,7 +466,7 @@ private:
    double GetTodayClosedProfit()
    {
       double p = 0.0;
-      HistorySelect(GetTradingDayStart(), TimeLocal());
+      SelectTodayHistory();
 
       for(int i=HistoryDealsTotal()-1; i>=0; i--)
       {
