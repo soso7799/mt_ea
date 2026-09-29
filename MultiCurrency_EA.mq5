@@ -49,11 +49,13 @@
 //   * Inp_TradeEnabled（預設 false = 只統計）：不開倉、不平倉、不改單，訊號只寫入日誌
 //------------------------------------------------------------------+
 #property version "5.90"
-#include <FilterLib_v5.mqh>
-#include <CandlePatterns.mqh>
-#include <BQ_ML.mqh>
-#include <MarketRegime.mqh>
-#include <NewsFilter.mqh>
+// 所有 .mqh 與本檔放在同一個資料夾（例如 MQL5\Experts\MultiCurrency\），用引號從本資料夾讀取，
+// 不需要另外複製到 MQL5\Include，也不會誤用 Include 裡的舊版 FilterLib
+#include "FilterLib_v5.mqh"
+#include "CandlePatterns.mqh"
+#include "BQ_ML.mqh"
+#include "MarketRegime.mqh"
+#include "NewsFilter.mqh"
 
 input group "=== Basic ==="
 input bool Inp_TradeEnabled = false; // 允許下單（false = 只統計：不開倉、不平倉、不改單，只計算並記錄）

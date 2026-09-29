@@ -11,7 +11,8 @@
 //--------------------------------------------------------------------
 // 支援幣別
 //--------------------------------------------------------------------
-const int SYMBOL_COUNT = 37;
+// MQL5 的陣列大小必須是編譯期常數，const int 不行（會出現 invalid index value），要用 #define
+#define SYMBOL_COUNT 37
 
 const string SYMBOLS[SYMBOL_COUNT] = {
 
