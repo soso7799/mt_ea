@@ -38,6 +38,7 @@ struct SRegime
    string   label;
 
    double   close;
+   double   barHigh, barLow;   // 判定所用 K棒的高低點 (統計腳本模擬止損止盈先後用)
    double   atr;
    double   ma5, ma10, ma20, ma34;
    int      maAlign;       // +1 多頭排列 / -1 空頭排列 / 0 糾結
@@ -58,6 +59,16 @@ struct SRegime
    double   support;       // 價格下方最近的斐波位 (0 = 無)
    double   resistance;    // 價格上方最近的斐波位 (0 = 無)
    string   fibZone;       // 例如 "回檔38.2~61.8%(黃金買區)"
+
+   // 斐波止損止盈建議 (以判定當時收盤價計算；0 = 無合適價位)
+   double   longSL, longTP, longRR;
+   double   shortSL, shortTP, shortRR;
+};
+
+enum ENUM_MR_STOPS
+{
+   MR_STOPS_RULES = 0,  // 用 fx_rules 固定止損止盈 (原本做法)
+   MR_STOPS_FIB   = 1   // 用斐波止損止盈 (算不出合適價位時退回 fx_rules)
 };
 
 class CMarketRegime
@@ -107,11 +118,16 @@ public:
    double          RsiLow;       // RSI 低檔區
    double          RsiHigh;      // RSI 高檔區
    double          FibNearATR;   // 「接近斐波位」的距離 (ATR 倍數)
+   double          StopBufATR;   // 止損放在斐波位外側的緩衝 (ATR 倍數)
+   double          MinSLATR;     // 止損最小距離 (ATR 倍數)
+   double          MaxSLATR;     // 止損最大距離 (ATR 倍數)
+   double          MinRR;        // 止盈至少要有的報酬風險比
 
    CMarketRegime()
    {
       TF = PERIOD_H1; SwingBars = 120; SlopeBars = 5;
       RsiDevLimit = 16; RsiLow = 30; RsiHigh = 70; FibNearATR = 0.3;
+      StopBufATR = 0.2; MinSLATR = 0.5; MaxSLATR = 3.0; MinRR = 1.5;
    }
 
    ~CMarketRegime() { Release(); }
@@ -163,7 +179,9 @@ public:
       if(CopyRates(sym, TF, 1, need, rt) != need) return false;
 
       r.time  = rt[0].time;
-      r.close = rt[0].close;
+      r.close   = rt[0].close;
+      r.barHigh = rt[0].high;
+      r.barLow  = rt[0].low;
 
       //--- 三線合一
       if(r.ma5 > r.ma10 && r.ma10 > r.ma20 && r.ma20 > r.ma34)      r.maAlign =  1;
@@ -238,6 +256,73 @@ public:
       else                         r.fibZone = what + ">78.6%(波段可能反轉)";
 
       r.valid = true;
+
+      // 以判定當時收盤價計算多/空兩邊的斐波止損止盈建議
+      if(!CalcStops(r,  1, r.close, r.longSL,  r.longTP,  r.longRR))  { r.longSL  = 0; r.longTP  = 0; r.longRR  = 0; }
+      if(!CalcStops(r, -1, r.close, r.shortSL, r.shortTP, r.shortRR)) { r.shortSL = 0; r.shortTP = 0; r.shortRR = 0; }
+
+      r.valid = true;
+      return true;
+   }
+
+   //-----------------------------------------------------------------
+   // 斐波止損止盈：dir=+1 多 / -1 空，price = 進場價
+   //  * 候選價位：0~100% 回檔位 + 波段兩端外的 127.2% / 161.8% 延伸位
+   //  * 止損：進場價下方(多)/上方(空)最近的斐波位，再往外 StopBufATR×ATR；
+   //          距離限制在 MinSLATR ~ MaxSLATR 倍 ATR 之間
+   //  * 止盈：往獲利方向找「第一個」報酬風險比 >= MinRR 的斐波位
+   //  找不到合適止盈回傳 false
+   //-----------------------------------------------------------------
+   bool CalcStops(const SRegime &r, int dir, double price, double &sl, double &tp, double &rr)
+   {
+      sl = 0; tp = 0; rr = 0;
+      if(!r.valid || r.atr <= 0) return false;
+      double range = r.swingHi - r.swingLo;
+      if(range <= 0) return false;
+
+      double lv[MR_NFIB + 4];
+      for(int i=0; i<MR_NFIB; i++) lv[i] = r.fib[i];
+      lv[MR_NFIB]     = r.swingLo - 0.272 * range;
+      lv[MR_NFIB + 1] = r.swingLo - 0.618 * range;
+      lv[MR_NFIB + 2] = r.swingHi + 0.272 * range;
+      lv[MR_NFIB + 3] = r.swingHi + 0.618 * range;
+      int n = MR_NFIB + 4;
+      ArraySort(lv);                          // 由低到高
+
+      double a   = r.atr;
+      double gap = 0.1 * a;                   // 貼著進場價的斐波位不算
+      double d;
+
+      if(dir > 0)
+      {
+         double s = 0;
+         for(int i=0; i<n; i++)
+            if(lv[i] < price - gap) s = lv[i];      // 下方最近
+         sl = (s > 0) ? s - StopBufATR * a : price - MaxSLATR * a;
+         d  = price - sl;
+         if(d < MinSLATR * a) { d = MinSLATR * a; sl = price - d; }
+         if(d > MaxSLATR * a) { d = MaxSLATR * a; sl = price - d; }
+
+         for(int i=0; i<n; i++)
+            if(lv[i] - price >= MinRR * d) { tp = lv[i]; break; }
+         if(tp <= 0) return false;
+         rr = (tp - price) / d;
+      }
+      else
+      {
+         double s = 0;
+         for(int i=n-1; i>=0; i--)
+            if(lv[i] > price + gap) s = lv[i];      // 上方最近
+         sl = (s > 0) ? s + StopBufATR * a : price + MaxSLATR * a;
+         d  = sl - price;
+         if(d < MinSLATR * a) { d = MinSLATR * a; sl = price + d; }
+         if(d > MaxSLATR * a) { d = MaxSLATR * a; sl = price + d; }
+
+         for(int i=n-1; i>=0; i--)
+            if(price - lv[i] >= MinRR * d) { tp = lv[i]; break; }
+         if(tp <= 0) return false;
+         rr = (price - tp) / d;
+      }
       return true;
    }
 
@@ -285,7 +370,19 @@ public:
                           r.rsi3, r.rsi6,
                           (r.rsiSignal > 0 ? "(負乖離過大→多)" : (r.rsiSignal < 0 ? "(正乖離過大→空)" : "")),
                           r.devATR, r.volRatio, r.fibZone,
-                          digits, r.support, digits, r.resistance);
+                          digits, r.support, digits, r.resistance)
+             + " | " + StopsText(r, digits);
+   }
+
+   string StopsText(const SRegime &r, int digits)
+   {
+      string s = (r.longTP > 0)
+                 ? StringFormat("多 SL%.*f TP%.*f RR%.1f", digits, r.longSL, digits, r.longTP, r.longRR)
+                 : "多 無合適止盈";
+      s += (r.shortTP > 0)
+           ? StringFormat("  空 SL%.*f TP%.*f RR%.1f", digits, r.shortSL, digits, r.shortTP, r.shortRR)
+           : "  空 無合適止盈";
+      return s;
    }
 };
 

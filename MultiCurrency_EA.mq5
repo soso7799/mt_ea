@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //  MultiCurrency_EA.mq5  v5.3
-//  7幣別平等競爭，ATR動能排序
+//  8幣別平等競爭，ATR動能排序
 //  5個指標全部同向 → 訂單上限由FilterLib控制
 //  風控全部由 FilterLib_v5.mqh 處理
 //
@@ -30,8 +30,16 @@
 //   * 每根 H1 K棒（每小時）對每個商品判定 多頭/空頭/盤整，計算斐波回檔位、支撐與壓力
 //   * 結果寫入日誌、圖表面板，並累積到 Common\Files\MarketRegime\ 的 CSV
 //   * Inp_MR_Mode 預設只收集；可選「順勢」或「順勢+避開斐波壓力/支撐」過濾進場
+//
+//  v5.8  斐波止損止盈
+//   * 每小時同時計算多/空兩邊的斐波止損、止盈與報酬風險比（寫入日誌/CSV）
+//   * 止損 = 進場價外側最近的斐波位再加 ATR 緩衝（限制在 0.5~3 ATR）；
+//     止盈 = 往獲利方向第一個 RR >= 1.5 的斐波位（含 127.2%/161.8% 延伸位）
+//   * Inp_MR_StopMode=斐波 時實際下單改用此止損止盈，並依止損寬窄調整手數維持風險金額
+//   * 新增第 8 個商品 USDCNH（Sym8 指標參數沿用 EURUSD、fx_rules 為估計值，需回測校準）
+//   * ml/regime_stats.py：統計每小時行情判定與斐波止損止盈的成效
 //------------------------------------------------------------------+
-#property version "5.70"
+#property version "5.80"
 #include <FilterLib_v5.mqh>
 #include <CandlePatterns.mqh>
 #include <BQ_ML.mqh>
@@ -82,6 +90,12 @@ input int             Inp_MR_SwingBars  = 120;         // 斐波波段回看K棒
 input double          Inp_MR_FibNearATR = 0.3;         // 接近斐波壓力/支撐的距離（ATR倍數）
 input double          Inp_MR_RsiDev     = 16;          // RSI3/RSI6 乖離門檻
 input bool            Inp_MR_CSV        = true;        // 每小時結果寫入 CSV
+input ENUM_MR_STOPS   Inp_MR_StopMode   = MR_STOPS_RULES; // 實際下單的止損止盈（預設 fx_rules，斐波只計算記錄）
+input double          Inp_MR_StopBufATR = 0.2;         // 止損放在斐波位外側的緩衝（ATR倍數）
+input double          Inp_MR_MinSLATR   = 0.5;         // 止損最小距離（ATR倍數）
+input double          Inp_MR_MaxSLATR   = 3.0;         // 止損最大距離（ATR倍數）
+input double          Inp_MR_MinRR      = 1.5;         // 止盈最少報酬風險比
+input bool            Inp_MR_KeepRisk   = true;        // 斐波止損時調整手數，維持每筆風險金額與 fx_rules 相同
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -91,6 +105,7 @@ input string Inp_Sym4 = "GBPUSD";
 input string Inp_Sym5 = "EURUSD";
 input string Inp_Sym6 = "USDCHF";
 input string Inp_Sym7 = "NZDUSD";
+input string Inp_Sym8 = "USDCNH";
 
 input group "=== Sym1 (USDJPY) ==="
 input int    S1_EMA_F=10;  input int    S1_EMA_S=30;
@@ -141,6 +156,13 @@ input int    S7_BB_P=18;  input double S7_BB_Std=2.0;
 input int    S7_MF=10;    input int    S7_MS=24;      input int S7_MSig=7;
 input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 
+input group "=== Sym8 (USDCNH) ===" // ⚠️ 預設值沿用 EURUSD(Sym5)，尚未針對 USDCNH 最佳化
+input int    S8_EMA_F=9;  input int    S8_EMA_S=26;
+input int    S8_RSI_P=14; input int    S8_RSI_OS=40; input int S8_RSI_OB=60;
+input int    S8_BB_P=14;  input double S8_BB_Std=1.75;
+input int    S8_MF=12;    input int    S8_MS=26;      input int S8_MSig=9;
+input int    S8_KP=9;     input int    S8_KK=3;       input int S8_KD=3;
+
 //------------------------------------------------------------------
 CFilterLib_Pro filter(Inp_Magic);
 ENUM_TIMEFRAMES g_tf   = PERIOD_M12;   // 實際策略週期（OnInit 由 Inp_TF 決定）
@@ -148,7 +170,7 @@ ENUM_TIMEFRAMES g_cpTF = PERIOD_M12;   // 實際型態週期
 CTrade         trade;
 CCandlePatterns cp;
 
-#define SYM_COUNT 7
+#define SYM_COUNT 8
 CBQMLFilter ml[SYM_COUNT];
 CMarketRegime mreg;
 SRegime  mr[SYM_COUNT];       // 各商品最近一次行情判定
@@ -360,7 +382,8 @@ void OpenRegimeCsv()
       FileWrite(mrCsv,"time","symbol","regime","score","close","ma5","ma10","ma20","ma34",
                 "ma_align","ma34_side","ma34_slope","macd_side","macd_cross","rsi3","rsi6","rsi_signal",
                 "dev_atr","vol_ratio","swing_hi","swing_lo","swing_dir","fib_ratio",
-                "fib236","fib382","fib500","fib618","fib786","support","resistance","fib_zone","patterns");
+                "fib236","fib382","fib500","fib618","fib786","support","resistance","fib_zone","patterns",
+                "long_sl","long_tp","long_rr","short_sl","short_tp","short_rr","high","low","atr");
    PrintFormat("行情判定寫入 Common\\Files\\%s",f);
 }
 
@@ -394,7 +417,10 @@ void UpdateRegimes()
                    DoubleToString(mr[i].fibRatio,3),
                    DoubleToString(mr[i].fib[1],dg),DoubleToString(mr[i].fib[2],dg),DoubleToString(mr[i].fib[3],dg),
                    DoubleToString(mr[i].fib[4],dg),DoubleToString(mr[i].fib[5],dg),
-                   DoubleToString(mr[i].support,dg),DoubleToString(mr[i].resistance,dg),mr[i].fibZone,pat);
+                   DoubleToString(mr[i].support,dg),DoubleToString(mr[i].resistance,dg),mr[i].fibZone,pat,
+                   DoubleToString(mr[i].longSL,dg),DoubleToString(mr[i].longTP,dg),DoubleToString(mr[i].longRR,2),
+                   DoubleToString(mr[i].shortSL,dg),DoubleToString(mr[i].shortTP,dg),DoubleToString(mr[i].shortRR,2),
+                   DoubleToString(mr[i].barHigh,dg),DoubleToString(mr[i].barLow,dg),DoubleToString(mr[i].atr,dg));
          FileFlush(mrCsv);
       }
    }
@@ -438,6 +464,10 @@ int OnInit()
    mreg.SwingBars   =Inp_MR_SwingBars;
    mreg.FibNearATR  =Inp_MR_FibNearATR;
    mreg.RsiDevLimit =Inp_MR_RsiDev;
+   mreg.StopBufATR  =Inp_MR_StopBufATR;
+   mreg.MinSLATR    =Inp_MR_MinSLATR;
+   mreg.MaxSLATR    =Inp_MR_MaxSLATR;
+   mreg.MinRR       =Inp_MR_MinRR;
    OpenRegimeCsv();
 
    ENUM_TIMEFRAMES mlTF=(Inp_ML_TF==PERIOD_CURRENT ? g_tf : Inp_ML_TF);
@@ -448,7 +478,7 @@ int OnInit()
    string want[SYM_COUNT];
    want[0]=Inp_Sym1; want[1]=Inp_Sym2; want[2]=Inp_Sym3;
    want[3]=Inp_Sym4; want[4]=Inp_Sym5; want[5]=Inp_Sym6;
-   want[6]=Inp_Sym7;
+   want[6]=Inp_Sym7; want[7]=Inp_Sym8;
    for(int i=0;i<SYM_COUNT;i++)
    {
       symbols[i]=ResolveSymbol(want[i]);
@@ -456,19 +486,19 @@ int OnInit()
          PrintFormat("商品 %s → 券商名稱 %s",want[i],symbols[i]);
    }
 
-   g_ef[0]=S1_EMA_F;   g_ef[1]=S2_EMA_F;   g_ef[2]=S3_EMA_F;   g_ef[3]=S4_EMA_F;   g_ef[4]=S5_EMA_F;   g_ef[5]=S6_EMA_F;   g_ef[6]=S7_EMA_F;
-   g_es[0]=S1_EMA_S;   g_es[1]=S2_EMA_S;   g_es[2]=S3_EMA_S;   g_es[3]=S4_EMA_S;   g_es[4]=S5_EMA_S;   g_es[5]=S6_EMA_S;   g_es[6]=S7_EMA_S;
-   g_rp[0]=S1_RSI_P;   g_rp[1]=S2_RSI_P;   g_rp[2]=S3_RSI_P;   g_rp[3]=S4_RSI_P;   g_rp[4]=S5_RSI_P;   g_rp[5]=S6_RSI_P;   g_rp[6]=S7_RSI_P;
-   g_bp[0]=S1_BB_P;    g_bp[1]=S2_BB_P;    g_bp[2]=S3_BB_P;    g_bp[3]=S4_BB_P;    g_bp[4]=S5_BB_P;    g_bp[5]=S6_BB_P;    g_bp[6]=S7_BB_P;
-   g_bs[0]=S1_BB_Std;  g_bs[1]=S2_BB_Std;  g_bs[2]=S3_BB_Std;  g_bs[3]=S4_BB_Std;  g_bs[4]=S5_BB_Std;  g_bs[5]=S6_BB_Std;  g_bs[6]=S7_BB_Std;
-   g_mf[0]=S1_MF;      g_mf[1]=S2_MF;      g_mf[2]=S3_MF;      g_mf[3]=S4_MF;      g_mf[4]=S5_MF;      g_mf[5]=S6_MF;      g_mf[6]=S7_MF;
-   g_ms[0]=S1_MS;      g_ms[1]=S2_MS;      g_ms[2]=S3_MS;      g_ms[3]=S4_MS;      g_ms[4]=S5_MS;      g_ms[5]=S6_MS;      g_ms[6]=S7_MS;
-   g_mg[0]=S1_MSig;    g_mg[1]=S2_MSig;    g_mg[2]=S3_MSig;    g_mg[3]=S4_MSig;    g_mg[4]=S5_MSig;    g_mg[5]=S6_MSig;    g_mg[6]=S7_MSig;
-   g_kp[0]=S1_KP;      g_kp[1]=S2_KP;      g_kp[2]=S3_KP;      g_kp[3]=S4_KP;      g_kp[4]=S5_KP;      g_kp[5]=S6_KP;      g_kp[6]=S7_KP;
-   g_kk[0]=S1_KK;      g_kk[1]=S2_KK;      g_kk[2]=S3_KK;      g_kk[3]=S4_KK;      g_kk[4]=S5_KK;      g_kk[5]=S6_KK;      g_kk[6]=S7_KK;
-   g_kd[0]=S1_KD;      g_kd[1]=S2_KD;      g_kd[2]=S3_KD;      g_kd[3]=S4_KD;      g_kd[4]=S5_KD;      g_kd[5]=S6_KD;      g_kd[6]=S7_KD;
-   g_ros[0]=S1_RSI_OS; g_ros[1]=S2_RSI_OS; g_ros[2]=S3_RSI_OS; g_ros[3]=S4_RSI_OS; g_ros[4]=S5_RSI_OS; g_ros[5]=S6_RSI_OS; g_ros[6]=S7_RSI_OS;
-   g_rob[0]=S1_RSI_OB; g_rob[1]=S2_RSI_OB; g_rob[2]=S3_RSI_OB; g_rob[3]=S4_RSI_OB; g_rob[4]=S5_RSI_OB; g_rob[5]=S6_RSI_OB; g_rob[6]=S7_RSI_OB;
+   g_ef[0]=S1_EMA_F;   g_ef[1]=S2_EMA_F;   g_ef[2]=S3_EMA_F;   g_ef[3]=S4_EMA_F;   g_ef[4]=S5_EMA_F;   g_ef[5]=S6_EMA_F;   g_ef[6]=S7_EMA_F;   g_ef[7]=S8_EMA_F;
+   g_es[0]=S1_EMA_S;   g_es[1]=S2_EMA_S;   g_es[2]=S3_EMA_S;   g_es[3]=S4_EMA_S;   g_es[4]=S5_EMA_S;   g_es[5]=S6_EMA_S;   g_es[6]=S7_EMA_S;   g_es[7]=S8_EMA_S;
+   g_rp[0]=S1_RSI_P;   g_rp[1]=S2_RSI_P;   g_rp[2]=S3_RSI_P;   g_rp[3]=S4_RSI_P;   g_rp[4]=S5_RSI_P;   g_rp[5]=S6_RSI_P;   g_rp[6]=S7_RSI_P;   g_rp[7]=S8_RSI_P;
+   g_bp[0]=S1_BB_P;    g_bp[1]=S2_BB_P;    g_bp[2]=S3_BB_P;    g_bp[3]=S4_BB_P;    g_bp[4]=S5_BB_P;    g_bp[5]=S6_BB_P;    g_bp[6]=S7_BB_P;   g_bp[7]=S8_BB_P;
+   g_bs[0]=S1_BB_Std;  g_bs[1]=S2_BB_Std;  g_bs[2]=S3_BB_Std;  g_bs[3]=S4_BB_Std;  g_bs[4]=S5_BB_Std;  g_bs[5]=S6_BB_Std;  g_bs[6]=S7_BB_Std;   g_bs[7]=S8_BB_Std;
+   g_mf[0]=S1_MF;      g_mf[1]=S2_MF;      g_mf[2]=S3_MF;      g_mf[3]=S4_MF;      g_mf[4]=S5_MF;      g_mf[5]=S6_MF;      g_mf[6]=S7_MF;   g_mf[7]=S8_MF;
+   g_ms[0]=S1_MS;      g_ms[1]=S2_MS;      g_ms[2]=S3_MS;      g_ms[3]=S4_MS;      g_ms[4]=S5_MS;      g_ms[5]=S6_MS;      g_ms[6]=S7_MS;   g_ms[7]=S8_MS;
+   g_mg[0]=S1_MSig;    g_mg[1]=S2_MSig;    g_mg[2]=S3_MSig;    g_mg[3]=S4_MSig;    g_mg[4]=S5_MSig;    g_mg[5]=S6_MSig;    g_mg[6]=S7_MSig;   g_mg[7]=S8_MSig;
+   g_kp[0]=S1_KP;      g_kp[1]=S2_KP;      g_kp[2]=S3_KP;      g_kp[3]=S4_KP;      g_kp[4]=S5_KP;      g_kp[5]=S6_KP;      g_kp[6]=S7_KP;   g_kp[7]=S8_KP;
+   g_kk[0]=S1_KK;      g_kk[1]=S2_KK;      g_kk[2]=S3_KK;      g_kk[3]=S4_KK;      g_kk[4]=S5_KK;      g_kk[5]=S6_KK;      g_kk[6]=S7_KK;   g_kk[7]=S8_KK;
+   g_kd[0]=S1_KD;      g_kd[1]=S2_KD;      g_kd[2]=S3_KD;      g_kd[3]=S4_KD;      g_kd[4]=S5_KD;      g_kd[5]=S6_KD;      g_kd[6]=S7_KD;   g_kd[7]=S8_KD;
+   g_ros[0]=S1_RSI_OS; g_ros[1]=S2_RSI_OS; g_ros[2]=S3_RSI_OS; g_ros[3]=S4_RSI_OS; g_ros[4]=S5_RSI_OS; g_ros[5]=S6_RSI_OS; g_ros[6]=S7_RSI_OS;   g_ros[7]=S8_RSI_OS;
+   g_rob[0]=S1_RSI_OB; g_rob[1]=S2_RSI_OB; g_rob[2]=S3_RSI_OB; g_rob[3]=S4_RSI_OB; g_rob[4]=S5_RSI_OB; g_rob[5]=S6_RSI_OB; g_rob[6]=S7_RSI_OB;   g_rob[7]=S8_RSI_OB;
 
    int okCount=0;
    for(int i=0;i<SYM_COUNT;i++)
@@ -521,7 +551,7 @@ int OnInit()
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
 
-   PrintFormat("EA v5.7 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
+   PrintFormat("EA v5.8 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
@@ -839,6 +869,16 @@ void TryOpenPositions()
       {
          double slD=0, tpD=0;
          filter.GetStopDistances(symbols[i], slD, tpD);
+
+         // 使用斐波止損止盈時，虛擬單也用同樣的距離標記，模型才學到實際的出場方式
+         double fsl=0, ftp=0, frr=0;
+         double px=(sig>0) ? SymbolInfoDouble(symbols[i],SYMBOL_ASK) : SymbolInfoDouble(symbols[i],SYMBOL_BID);
+         if(Inp_MR_StopMode==MR_STOPS_FIB && mreg.CalcStops(mr[i], sig, px, fsl, ftp, frr))
+         {
+            slD=MathAbs(px-fsl);
+            tpD=MathAbs(ftp-px);
+         }
+
          if(!ml[i].Allow(sig, slD, tpD))
          {
             sig=0;
@@ -899,6 +939,22 @@ void TryOpenPositions()
       return;
    double lot = filter.GetLotSize(sym) * ml[bestIndex].LotFactor();
 
+   // 斐波止損止盈：用當下報價重新計算；算不出合適價位時沿用 fx_rules
+   double fsl=0, ftp=0, frr=0;
+   double px=(sig>0) ? SymbolInfoDouble(sym,SYMBOL_ASK) : SymbolInfoDouble(sym,SYMBOL_BID);
+   if(Inp_MR_StopMode==MR_STOPS_FIB && mreg.CalcStops(mr[bestIndex], sig, px, fsl, ftp, frr))
+   {
+      double ruleSL=MathAbs(px-sl), fibSL=MathAbs(px-fsl);
+      // 維持每筆風險金額不變：斐波止損較寬就減少手數，較窄就增加
+      if(Inp_MR_KeepRisk && ruleSL>0 && fibSL>0)
+         lot*=ruleSL/fibSL;
+      int dg=(int)SymbolInfoInteger(sym,SYMBOL_DIGITS);
+      PrintFormat("📐 %s 斐波止損止盈 SL %.*f→%.*f  TP %.*f→%.*f  RR %.1f  lot %.2f",
+                  sym,dg,sl,dg,fsl,dg,tp,dg,ftp,frr,lot);
+      sl=fsl;
+      tp=ftp;
+   }
+
    // 成交模式、手數步進、最小停損距離、retcode 檢查與重試都在 OpenMarket 處理，失敗原因會印在日誌
    if(filter.OpenMarket(sym, sig, lot, sl, tp, sig>0 ? "MC BUY" : "MC SELL"))
       MarkBarUsed(bestIndex);
@@ -943,7 +999,7 @@ void RunCycle()
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.7  週期="+EnumToString(g_tf)+"\n",
+      "MultiCurrency EA v5.8  週期="+EnumToString(g_tf)+"\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",

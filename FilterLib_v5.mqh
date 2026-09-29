@@ -11,7 +11,7 @@
 //--------------------------------------------------------------------
 // 支援幣別
 //--------------------------------------------------------------------
-const int SYMBOL_COUNT = 36;
+const int SYMBOL_COUNT = 37;
 
 const string SYMBOLS[SYMBOL_COUNT] = {
 
@@ -35,6 +35,7 @@ const string SYMBOLS[SYMBOL_COUNT] = {
    "USDJPY",
    "USDMXN",
    "USDTRY",
+   "USDCNH",   // 離岸人民幣（v5.8 新增，fx_rules 為估計值）
    // ⚠️ 以下7個是預留（金屬/石油/天然氣），一勞永逸先擴充進來備用，
    // 目前 MultiCurrency_EA.mq5 沒有交易這些商品，加進來只是讓 F段
    // 背景監控涵蓋得到；要實際交易還是要去 fx_rules[] 校準SL/TP數字。
@@ -560,13 +561,18 @@ public:
    //-----------------------------------------------------------------
    void InitRules()
    {
-      ArrayResize(fx_rules, 21);
+      ArrayResize(fx_rules, 22);
 
       // ⚠️ EURUSD 為估計值，不是像其他 20 筆一樣回測校準出來的數字——
       // sl_pips 用同為 XXXUSD 報價、波動相近的 GBPUSD/AUDUSD/USDCAD 內插，
       // tp_pips=2×sl_pips、atr_threshold=(2/3)×sl_pips 沿用其餘各列的固定比例，
       // lot_size 依「每筆風險金額≈GBPUSD/AUDUSD/NZDUSD 三者的平均值」反推。
       // 正式交易前請自行用實際回測數據覆蓋這一列。
+      // ⚠️ USDCNH 同樣是估計值：日均波幅約 300~400 pips(0.0001)，依 EURUSD「止損≈日均波幅 28%」
+      // 的比例推得 sl≈100 pips；tp=2×sl、atr_threshold=(2/3)×sl 沿用固定比例；
+      // 1 手每 pip 約 $1.39(=10/7.2)，lot 依每筆風險≈$107(同 EURUSD) 反推。正式交易前請用回測數據覆蓋。
+      fx_rules[21].symbol="USDCNH"; fx_rules[21].sl_pips=100.00; fx_rules[21].tp_pips=200.00; fx_rules[21].atr_threshold=66.67; fx_rules[21].lot_size=0.77;
+
       fx_rules[20].symbol="EURUSD"; fx_rules[20].sl_pips=21.00; fx_rules[20].tp_pips=42.00;  fx_rules[20].atr_threshold=14.00;  fx_rules[20].lot_size=0.51;
 
       fx_rules[0].symbol="AUDJPY";  fx_rules[0].sl_pips=34.41;  fx_rules[0].tp_pips=68.82;   fx_rules[0].atr_threshold=22.94;   fx_rules[0].lot_size=0.49;
