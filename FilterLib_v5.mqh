@@ -158,10 +158,21 @@ private:
    //-----------------------------------------------------------------
    // v4 私有工具
    //-----------------------------------------------------------------
+   //-----------------------------------------------------------------
+   // 排程時間 = 伺服器時間 + ScheduleOffsetHours（預設 6 = 冬令台灣時間）
+   // 所有每日排程（交易日起點、強平、禁單時段、每日重置）都用這個時間，
+   // 跟著 FTMO 伺服器自動切換冬令/夏令：夏令時 05:45 對應台灣 04:45，
+   // 永遠在伺服器換日(00:00)前 15 分鐘強平。回測時伺服器時間照樣正確。
+   //-----------------------------------------------------------------
+   datetime SchedNow()
+   {
+      return (datetime)((long)TimeTradeServer() + (long)ScheduleOffsetHours * 3600);
+   }
+
    MqlDateTime LocalNow()
    {
       MqlDateTime t;
-      TimeToStruct(TimeLocal(), t);
+      TimeToStruct(SchedNow(), t);
       return t;
    }
 
@@ -343,15 +354,13 @@ private:
       return -1;
    }
 
-   // 本機時間 - 伺服器時間（四捨五入到 15 分鐘）。成交歷史是伺服器時間，
-   // 交易日起點（TradingStartHour，本機時間）要換算後才能拿去 HistorySelect
+   // 排程時間 - 伺服器時間。成交歷史是伺服器時間，交易日起點要換算後才能拿去 HistorySelect
    long ServerOffset()
    {
-      long off = (long)(TimeLocal() - TimeTradeServer());
-      return (long)MathRound(off / 900.0) * 900;
+      return (long)ScheduleOffsetHours * 3600;
    }
 
-   // 今日（本機 TradingStart 起）成交歷史，以伺服器時間查詢
+   // 今日（排程時間 TradingStart 起）成交歷史，以伺服器時間查詢
    bool SelectTodayHistory()
    {
       datetime from = (datetime)((long)GetTradingDayStart() - ServerOffset());
@@ -366,7 +375,7 @@ private:
       t.sec  = 0;
 
       datetime start = StructToTime(t);
-      if(TimeLocal() < start)
+      if(SchedNow() < start)
          return start - 86400;
 
       return start;
@@ -570,6 +579,8 @@ public:
    int StepProfitPips;
    int StepLockPips;
 
+   int ScheduleOffsetHours;   // 排程時間 = 伺服器時間 + N 小時（FTMO + 台灣 = 6，冬夏令自動跟隨伺服器）
+
    int TradingStartHour; int TradingStartMin;
    int NoTradeStartHour; int NoTradeStartMin;
    int NoTradeEndHour;   int NoTradeEndMin;
@@ -650,6 +661,7 @@ public:
       StepProfitPips = 30;
       StepLockPips = 15;
 
+      ScheduleOffsetHours = 6;
       TradingStartHour = 7;  TradingStartMin = 15;
       NoTradeStartHour = 4;  NoTradeStartMin = 45;
       NoTradeEndHour   = 7;  NoTradeEndMin   = 15;
@@ -883,7 +895,7 @@ public:
             Print("✅ 啟動時重置完成");
          }
 
-         lastResetDay = TimeLocal();
+         lastResetDay = SchedNow();
          return;
       }
 
@@ -905,7 +917,7 @@ public:
                GlobalVariableDel(key);
          }
 
-         lastResetDay     = TimeLocal();
+         lastResetDay     = SchedNow();
          forceClosedToday = false;
          Print("✅ 每日重置完成");
       }
@@ -1193,7 +1205,7 @@ public:
       string w2 = StringFormat("%02d:%02d~%02d:%02d", NoTrade2StartHour, NoTrade2StartMin, NoTrade2EndHour, NoTrade2EndMin);
 
       string r = "━━━━━━━━━━━━━━━━━━━━━━━━\n";
-      r += StringFormat("⏰ %02d:%02d:%02d  淨值:$%.2f(警戒$%.0f)\n",
+      r += StringFormat("⏰ 排程 %02d:%02d:%02d  淨值:$%.2f(警戒$%.0f)\n",
                         t.hour, t.min, t.sec,
                         AccountInfoDouble(ACCOUNT_EQUITY), AccountEquityFloor);
       r += StringFormat("📊 總PnL:$%.2f(限$%.0f)\n", GetTotalDayPnL(), DayLossLimit);

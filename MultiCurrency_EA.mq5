@@ -44,6 +44,8 @@
 //   * 風控改為參數：帳戶大小、每日虧損 %、總虧損 %
 //   * 每日強平改 05:45 並可設定；修正原本實際在 07:15 才強平、05:45 不平的問題
 //   * 高影響新聞前後不開倉、不主動平倉（可選新聞前先平倉）；週五 22:30（伺服器時間）平倉不留週末
+//   * 冬令/夏令自動調整：所有每日排程改以 FTMO 伺服器時間 + Inp_ScheduleOffset(6) 計算，
+//     設定值維持冬令台灣時間（05:45、07:15…），夏令時自動提早 1 小時
 //------------------------------------------------------------------+
 #property version "5.90"
 #include <FilterLib_v5.mqh>
@@ -110,7 +112,8 @@ input double          Inp_MR_MinRR      = 1.5;         // 止盈最少報酬風�
 input bool            Inp_MR_KeepRisk   = true;        // 斐波止損時調整手數，維持每筆風險金額與 fx_rules 相同
 
 input group "=== FTMO：每日強平 / 重大新聞 / 週末 ==="
-input int  Inp_ForceCloseHour  = 5;     // 每日強制平倉：幾點（本機時間）
+input int  Inp_ScheduleOffset  = 6;     // 排程時間 = 伺服器時間 + N 小時（6 = 冬令台灣時間，冬夏令自動跟隨 FTMO 伺服器）
+input int  Inp_ForceCloseHour  = 5;     // 每日強制平倉：幾點（排程時間）
 input int  Inp_ForceCloseMin   = 45;    //   …幾分（預設 05:45）
 input bool Inp_News_Enable     = true;  // 高影響新聞前後不開倉、不主動平倉（回測無日曆資料，不作用）
 input int  Inp_News_BeforeMin  = 5;     // 新聞前幾分鐘開始（FTMO 規定 2 分鐘，留緩衝）
@@ -454,6 +457,20 @@ void UpdateRegimes()
    }
 }
 
+// 啟動時印出排程對照：排程時間 ↔ 伺服器時間 ↔ 本機時間，方便確認冬令/夏令
+void LogSchedule()
+{
+   long srvUtc =(long)MathRound((double)((long)TimeTradeServer()-(long)TimeGMT())/1800.0)*1800;
+   long locSrv =(long)MathRound((double)((long)TimeLocal()-(long)TimeTradeServer())/1800.0)*1800;
+   int  fc     =Inp_ForceCloseHour*60+Inp_ForceCloseMin;
+   int  srvMin =((fc-Inp_ScheduleOffset*60)%1440+1440)%1440;
+   int  locMin =((srvMin+(int)(locSrv/60))%1440+1440)%1440;
+   PrintFormat("排程：伺服器 GMT%+.1f%s，排程時間 = 伺服器 %+d 小時；每日強平 排程 %02d:%02d = 伺服器 %02d:%02d = 本機 %02d:%02d",
+               srvUtc/3600.0, MQLInfoInteger(MQL_TESTER) ? "（回測）" : (srvUtc>=3*3600 ? "（夏令）" : "（冬令）"),
+               Inp_ScheduleOffset, Inp_ForceCloseHour, Inp_ForceCloseMin,
+               srvMin/60, srvMin%60, locMin/60, locMin%60);
+}
+
 void ReleaseHandles(int i)
 {
    if(H[i].ef   !=INVALID_HANDLE) IndicatorRelease(H[i].ef);
@@ -481,9 +498,8 @@ int OnInit()
    // FTMO 風控：依帳戶大小換算金額
    filter.DayLossLimit       = -Inp_AccountSize * Inp_DailyLossPct / 100.0;
    filter.AccountEquityFloor =  Inp_AccountSize * (1.0 - Inp_MaxLossPct / 100.0);
-   PrintFormat("風控：每日虧損上限 $%.0f（%.1f%%），淨值下限 $%.0f（-%.1f%%），伺服器時差 %+.1f 小時",
-               filter.DayLossLimit, Inp_DailyLossPct, filter.AccountEquityFloor, Inp_MaxLossPct,
-               (double)((long)(TimeLocal()-TimeTradeServer()))/3600.0);
+   PrintFormat("風控：每日虧損上限 $%.0f（%.1f%%），淨值下限 $%.0f（-%.1f%%）",
+               filter.DayLossLimit, Inp_DailyLossPct, filter.AccountEquityFloor, Inp_MaxLossPct);
    if(Inp_DailyLossPct>=5.0 || Inp_MaxLossPct>=10.0)
       Print("⚠️ 風控上限已達或超過 FTMO 規定（每日 5% / 總計 10%），沒有任何緩衝");
 
@@ -506,8 +522,10 @@ int OnInit()
    mreg.MaxSLATR    =Inp_MR_MaxSLATR;
    mreg.MinRR       =Inp_MR_MinRR;
 
+   filter.ScheduleOffsetHours=Inp_ScheduleOffset;
    filter.ForceCloseHour=Inp_ForceCloseHour;
    filter.ForceCloseMin =Inp_ForceCloseMin;
+   LogSchedule();
 
    news.BeforeMin    =Inp_News_BeforeMin;
    news.AfterMin     =Inp_News_AfterMin;
