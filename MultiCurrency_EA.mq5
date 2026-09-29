@@ -21,10 +21,10 @@
 //   * 每個訊號（含被擋掉、沒被選中的）都建立虛擬單追蹤標記，避免選擇偏誤
 //   * 模型存在 Common\Files\BeeQuantML\，可匯出 CSV 用 ml/train_logit.py 離線訓練
 //
-//  v5.6  策略週期改為參數 Inp_TF（預設 M15，原本寫死 M12）
+//  v5.6  策略週期改為參數 Inp_TF（預設 M12，與原本相同）
 //   * 進場指標、新K棒判斷、追蹤停損擺動點、F段反向信號平倉、K線型態、ML 全部使用同一週期
 //     （原本 F段反向信號用的是 FilterLib 建構子預設的 H1，與進場的 M12 不一致）
-//   * ⚠️ 各商品指標參數原本是在 M12 上調整的，改週期後請重新回測/最佳化
+//   * ⚠️ 各商品指標參數是在 M12 上調整的，改用其他週期請重新回測/最佳化
 //------------------------------------------------------------------+
 #property version "5.60"
 #include <FilterLib_v5.mqh>
@@ -32,7 +32,7 @@
 #include <BQ_ML.mqh>
 
 input group "=== Basic ==="
-input ENUM_TIMEFRAMES Inp_TF = PERIOD_M15; // 策略週期（進場/追蹤停損/反向平倉/型態/ML 共用）
+input ENUM_TIMEFRAMES Inp_TF = PERIOD_M12; // 策略週期（進場/追蹤停損/反向平倉/型態/ML 共用）
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
@@ -129,8 +129,8 @@ input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 
 //------------------------------------------------------------------
 CFilterLib_Pro filter(Inp_Magic);
-ENUM_TIMEFRAMES g_tf   = PERIOD_M15;   // 實際策略週期（OnInit 由 Inp_TF 決定）
-ENUM_TIMEFRAMES g_cpTF = PERIOD_M15;   // 實際型態週期
+ENUM_TIMEFRAMES g_tf   = PERIOD_M12;   // 實際策略週期（OnInit 由 Inp_TF 決定）
+ENUM_TIMEFRAMES g_cpTF = PERIOD_M12;   // 實際型態週期
 CTrade         trade;
 CCandlePatterns cp;
 
