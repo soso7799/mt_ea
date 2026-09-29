@@ -38,12 +38,19 @@
 //   * Inp_MR_StopMode=斐波 時實際下單改用此止損止盈，並依止損寬窄調整手數維持風險金額
 //   * 新增第 8 個商品 USDCNH（Sym8 指標參數沿用 EURUSD、fx_rules 為估計值，需回測校準）
 //   * ml/regime_stats.py：統計每小時行情判定與斐波止損止盈的成效
+//
+//  v5.9  FTMO
+//   * 修正每日虧損/止損次數用本機時間查伺服器時間的成交紀錄（少算 FTMO 換日後的虧損）
+//   * 風控改為參數：帳戶大小、每日虧損 %、總虧損 %
+//   * 每日強平改 05:45 並可設定；修正原本實際在 07:15 才強平、05:45 不平的問題
+//   * 高影響新聞前後不開倉、不主動平倉（可選新聞前先平倉）；週五 22:30（伺服器時間）平倉不留週末
 //------------------------------------------------------------------+
-#property version "5.80"
+#property version "5.90"
 #include <FilterLib_v5.mqh>
 #include <CandlePatterns.mqh>
 #include <BQ_ML.mqh>
 #include <MarketRegime.mqh>
+#include <NewsFilter.mqh>
 
 input group "=== Basic ==="
 input ENUM_TIMEFRAMES Inp_TF = PERIOD_M12; // 策略週期（進場/追蹤停損/反向平倉/型態/ML 共用）
@@ -101,6 +108,19 @@ input double          Inp_MR_MinSLATR   = 0.5;         // 止損最小距離（A
 input double          Inp_MR_MaxSLATR   = 3.0;         // 止損最大距離（ATR倍數）
 input double          Inp_MR_MinRR      = 1.5;         // 止盈最少報酬風險比
 input bool            Inp_MR_KeepRisk   = true;        // 斐波止損時調整手數，維持每筆風險金額與 fx_rules 相同
+
+input group "=== FTMO：每日強平 / 重大新聞 / 週末 ==="
+input int  Inp_ForceCloseHour  = 5;     // 每日強制平倉：幾點（本機時間）
+input int  Inp_ForceCloseMin   = 45;    //   …幾分（預設 05:45）
+input bool Inp_News_Enable     = true;  // 高影響新聞前後不開倉、不主動平倉（回測無日曆資料，不作用）
+input int  Inp_News_BeforeMin  = 5;     // 新聞前幾分鐘開始（FTMO 規定 2 分鐘，留緩衝）
+input int  Inp_News_AfterMin   = 5;     // 新聞後幾分鐘結束
+input bool Inp_News_Medium     = false; // 也避開中等影響新聞
+input int  Inp_News_ClosePreMin= 0;     // 新聞前再提早幾分鐘先平掉受影響商品的倉（0=不平倉）
+input bool Inp_Fri_Enable      = true;  // 週五收盤前平倉、不留倉過週末（FTMO Swing 帳戶可關閉）
+input int  Inp_Fri_NoEntryHour = 20;    // 週五幾點（伺服器時間）起不再開新倉
+input int  Inp_Fri_CloseHour   = 22;    // 週五幾點（伺服器時間）全部平倉
+input int  Inp_Fri_CloseMin    = 30;    //   …幾分
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -178,6 +198,8 @@ CCandlePatterns cp;
 #define SYM_COUNT 8
 CBQMLFilter ml[SYM_COUNT];
 CMarketRegime mreg;
+CNewsFilter   news;
+string        newsReason[SYM_COUNT];   // 目前新聞時段的事件（空白=不在新聞時段）
 SRegime  mr[SYM_COUNT];       // 各商品最近一次行情判定
 datetime mrBar[SYM_COUNT];    // 最近一次判定的 Inp_MR_TF K棒
 int      mrCsv=INVALID_HANDLE;   // 每個商品一個 ML 模型（模型檔名含商品名稱，互不干擾）
@@ -244,6 +266,7 @@ void CheckPatternExit()
 
          int dir=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY) ? 1 : -1;
          if(dir!=-pd) continue;
+         if(newsReason[si]!="") continue;   // 新聞時段不主動平倉
 
          trade.SetTypeFillingBySymbol(symbols[si]);
          if(trade.PositionClose(ticket) &&
@@ -482,6 +505,13 @@ int OnInit()
    mreg.MinSLATR    =Inp_MR_MinSLATR;
    mreg.MaxSLATR    =Inp_MR_MaxSLATR;
    mreg.MinRR       =Inp_MR_MinRR;
+
+   filter.ForceCloseHour=Inp_ForceCloseHour;
+   filter.ForceCloseMin =Inp_ForceCloseMin;
+
+   news.BeforeMin    =Inp_News_BeforeMin;
+   news.AfterMin     =Inp_News_AfterMin;
+   news.IncludeMedium=Inp_News_Medium;
    OpenRegimeCsv();
 
    ENUM_TIMEFRAMES mlTF=(Inp_ML_TF==PERIOD_CURRENT ? g_tf : Inp_ML_TF);
@@ -565,7 +595,7 @@ int OnInit()
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
 
-   PrintFormat("EA v5.8 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
+   PrintFormat("EA v5.9 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
@@ -863,6 +893,10 @@ void TryOpenPositions()
       if(!symOk[i])
          continue;
 
+      // FTMO：新聞時段不開新倉（不標記K棒，新聞時段結束後這根K棒仍可進場）
+      if(newsReason[i]!="")
+         continue;
+
       if(!CheckNewBar(i))
          continue;
 
@@ -975,6 +1009,83 @@ void TryOpenPositions()
 }
 
 //------------------------------------------------------------------
+// FTMO：重大新聞
+//------------------------------------------------------------------
+void ClosePositionsOf(const string sym,const string reason)
+{
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      if(PositionGetString(POSITION_SYMBOL)!=sym) continue;
+      if(PositionGetInteger(POSITION_MAGIC)!=Inp_Magic) continue;
+
+      trade.SetTypeFillingBySymbol(sym);
+      if(trade.PositionClose(ticket) &&
+         (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
+         PrintFormat("📰 %s #%I64u 平倉：%s",sym,ticket,reason);
+      else
+         PrintFormat("❌ %s #%I64u 平倉失敗 retcode=%u（%s）",sym,ticket,trade.ResultRetcode(),reason);
+   }
+}
+
+void UpdateNews()
+{
+   string blocked=";";
+   for(int i=0;i<SYM_COUNT;i++) newsReason[i]="";
+
+   if(Inp_News_Enable)
+   {
+      news.Refresh();
+      for(int i=0;i<SYM_COUNT;i++)
+      {
+         if(!symOk[i]) continue;
+
+         string why="";
+         if(news.InWindow(symbols[i],why))
+         {
+            newsReason[i]=why;
+            blocked+=symbols[i]+";";
+            continue;
+         }
+
+         // 新聞前提早平倉（在禁止成交的時段開始之前）
+         if(Inp_News_ClosePreMin>0 && HasPos(symbols[i]) && news.InWindow(symbols[i],why,Inp_News_ClosePreMin))
+            ClosePositionsOf(symbols[i],"新聞前平倉 "+why);
+      }
+   }
+   filter.NewsBlocked=blocked;
+}
+
+//------------------------------------------------------------------
+// FTMO：週末（伺服器時間）
+//------------------------------------------------------------------
+bool FridayNoEntry()
+{
+   if(!Inp_Fri_Enable) return false;
+   MqlDateTime t;
+   TimeToStruct(TimeTradeServer(),t);
+   if(t.day_of_week==6 || t.day_of_week==0) return true;
+   return (t.day_of_week==5 && t.hour>=Inp_Fri_NoEntryHour);
+}
+
+void CheckFridayClose()
+{
+   if(!Inp_Fri_Enable || CountPos()==0) return;
+   MqlDateTime t;
+   TimeToStruct(TimeTradeServer(),t);
+   bool late=(t.day_of_week==5 && t.hour*60+t.min>=Inp_Fri_CloseHour*60+Inp_Fri_CloseMin) ||
+             t.day_of_week==6 || t.day_of_week==0;
+   if(!late) return;
+
+   // 休市時平倉會失敗，每分鐘最多嘗試一次，避免洗版
+   static datetime lastTry=0;
+   if(TimeTradeServer()-lastTry<60) return;
+   lastTry=TimeTradeServer();
+   filter.CloseAllPositions("週五收盤前平倉（FTMO 不留倉過週末）");
+}
+
+//------------------------------------------------------------------
 void RunCycle()
 {
    // 推進各商品的 ML 虛擬單（先到停利=1 / 先到停損=0），並即時更新模型
@@ -982,10 +1093,13 @@ void RunCycle()
       if(symOk[i]) ml[i].OnTick();
 
    UpdateRegimes();
+   UpdateNews();
 
    filter.MonitorPositions();
+   CheckFridayClose();
    CheckPatternExit();
-   TryOpenPositions();
+   if(!FridayNoEntry())
+      TryOpenPositions();
 
    // 回測不繪製面板，節省時間
    if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE))
@@ -996,9 +1110,11 @@ void RunCycle()
    string cpInfo="";
    string mlInfo="";
    string mrInfo="";
+   string newsInfo="";
    for(int i=0;i<SYM_COUNT;i++)
    {
       if(!symOk[i]) continue;
+      if(newsReason[i]!="") newsInfo+="  ⛔ "+symbols[i]+" "+newsReason[i]+"\n";
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
       symList+=(symList=="" ? "" : "/")+symbols[i];
       if(cpNames[i]!="") cpInfo+=symbols[i]+": "+cpNames[i]+"\n";
@@ -1013,13 +1129,15 @@ void RunCycle()
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.8  週期="+EnumToString(g_tf)+"\n",
+      "MultiCurrency EA v5.9  週期="+EnumToString(g_tf)+"\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
       "K線型態("+EnumToString(Inp_CP_Mode)+"):\n"+(cpInfo=="" ? "  無\n" : cpInfo),
       "ML("+EnumToString(Inp_ML_Mode)+"): "+(mlInfo=="" ? "關閉" : mlInfo)+"\n",
       "行情("+EnumToString(Inp_MR_TF)+" "+EnumToString(Inp_MR_Mode)+"):\n"+(mrInfo=="" ? "  計算中\n" : mrInfo)+"\n",
+      "新聞/週末: "+(!Inp_News_Enable ? "新聞濾網關閉" : (newsInfo=="" ? "無新聞時段" : "\n"+newsInfo))+
+      (FridayNoEntry() ? "  ⏸ 週末前停止開倉" : "")+"\n\n",
       filter.GetStatusReport(reportSym)
    );
 }

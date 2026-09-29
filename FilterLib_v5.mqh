@@ -553,6 +553,13 @@ public:
    //-----------------------------------------------------------------
    // v4 公開參數
    //-----------------------------------------------------------------
+   // 目前在新聞時段的商品，格式 ";USDJPY;EURUSD;"（由 EA 每個循環更新）
+   string NewsBlocked;
+   bool   IsNewsBlocked(string sym) { return StringFind(NewsBlocked, ";" + sym + ";") >= 0; }
+
+   // 全部平倉（週五收盤前等 EA 端規則使用）
+   void   CloseAllPositions(string reason) { CloseAll(reason); }
+
    double DayLossLimit;
    double AccountEquityFloor;
    double VolatilityMultiplier;
@@ -646,13 +653,14 @@ public:
       TradingStartHour = 7;  TradingStartMin = 15;
       NoTradeStartHour = 4;  NoTradeStartMin = 45;
       NoTradeEndHour   = 7;  NoTradeEndMin   = 15;
-      ForceCloseHour   = 5;  ForceCloseMin   = 50;
+      ForceCloseHour   = 5;  ForceCloseMin   = 45;
 
       NoTrade2StartHour = 17; NoTrade2StartMin = 50;
       NoTrade2EndHour   = 18; NoTrade2EndMin   = 10;
 
       lastResetDay     = 0;
       forceClosedToday = false;
+      NewsBlocked      = "";
 
       InitRules();
 
@@ -905,19 +913,35 @@ public:
 
    void CheckForceClose()
    {
-      if(forceClosedToday) return;
-
       MqlDateTime t = LocalNow();
       int nowMin   = t.hour * 60 + t.min;
       int closeMin = ForceCloseHour * 60 + ForceCloseMin;
+      int startMin = TradingStartHour * 60 + TradingStartMin;
 
-      // 用「分鐘數是否已過強平時間」取代「小時剛好相等」，
-      // 避免錯過該小時內唯一一次 tick 就導致當天永遠不強平
-      if(nowMin >= closeMin)
+      // 強平時段 = 強平時間 ~ 下一個交易日起點（預設 05:45 ~ 07:15）。
+      // 原本只判斷「現在 >= 強平時間」，而 forceClosedToday 要到 07:15 換日才重置：
+      // 結果是 07:15 一換日就把倉位全平，隔天 05:45 反而因旗標未重置而不平；
+      // EA 白天啟動時也會立刻全平。改成只在強平時段內動作，平不完就持續重試。
+      bool inWin = (closeMin <= startMin) ? (nowMin >= closeMin && nowMin < startMin)
+                                          : (nowMin >= closeMin || nowMin < startMin);
+      if(!inWin)
       {
-         CloseAll("05:50強平");
-         forceClosedToday = true;
+         forceClosedToday = false;
+         return;
       }
+      if(forceClosedToday) return;
+
+      // 休市時平倉會失敗：每分鐘最多重試一次，避免洗版
+      static datetime lastTry = 0;
+      if(TimeLocal() - lastTry < 60) return;
+      lastTry = TimeLocal();
+
+      CloseAll(StringFormat("%02d:%02d強平", ForceCloseHour, ForceCloseMin));
+
+      bool left = false;
+      for(int i=PositionsTotal()-1; i>=0; i--)
+         if(pos.SelectByIndex(i) && pos.Magic() == magic) { left = true; break; }
+      forceClosedToday = !left;
    }
 
    bool IsInNoTradeWindow()
@@ -1052,6 +1076,10 @@ public:
             LockSymbol(sym);
             continue;
          }
+
+         // 新聞時段：不做主動平倉（ATR異常平倉、反向信號平倉）也不收緊追蹤停損，
+         // 避免在 FTMO 禁止成交的新聞前後產生成交；淨值/每日虧損的風控平倉不受影響
+         if(IsNewsBlocked(sym)) continue;
 
          if(!IsVolatilityNormal(sym))
          {
