@@ -339,6 +339,27 @@ private:
               rc == TRADE_RETCODE_PRICE_OFF || rc == TRADE_RETCODE_TIMEOUT);
    }
 
+   // 同一商品的「ATR 異常」訊息每分鐘最多印一次（EA 每秒檢查，避免洗版）
+   string   m_volMsgSym[];
+   datetime m_volMsgTime[];
+   bool _volMsgDue(string sym)
+   {
+      datetime now = TimeTradeServer();
+      int n = ArraySize(m_volMsgSym);
+      for(int i=0; i<n; i++)
+      {
+         if(m_volMsgSym[i] != sym) continue;
+         if(now - m_volMsgTime[i] < 60) return false;
+         m_volMsgTime[i] = now;
+         return true;
+      }
+      ArrayResize(m_volMsgSym,  n+1);
+      ArrayResize(m_volMsgTime, n+1);
+      m_volMsgSym[n]  = sym;
+      m_volMsgTime[n] = now;
+      return true;
+   }
+
    bool _closeTicket(ulong ticket, string sym)
    {
       if(!TradingEnabled) return false;   // 只統計模式：絕不平倉
@@ -875,7 +896,7 @@ public:
       double limit   = fx_rules[idx].atr_threshold * VolatilityMultiplier;
       bool normal    = (atrPips < limit);
 
-      if(!normal)
+      if(!normal && _volMsgDue(sym))
          Print("🚫 ", sym, " ATR=", DoubleToString(atrPips,1), " > ", DoubleToString(limit,1), " pips");
 
       return normal;

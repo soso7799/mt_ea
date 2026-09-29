@@ -1011,7 +1011,11 @@ void TryOpenPositions()
    double sl=0, tp=0;
 
    if(!filter.AllowTrading(sym, sig, sl, tp))
+   {
+      // 這根K棒不再重試此商品：否則它每秒都排第一、每秒被拒，其他有訊號的商品永遠輪不到
+      MarkBarUsed(bestIndex);
       return;
+   }
    double lot = filter.GetLotSize(sym) * ml[bestIndex].LotFactor();
 
    // 斐波止損止盈：用當下報價重新計算；算不出合適價位時沿用 fx_rules
