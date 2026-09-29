@@ -25,11 +25,17 @@
 //   * 進場指標、新K棒判斷、追蹤停損擺動點、F段反向信號平倉、K線型態、ML 全部使用同一週期
 //     （原本 F段反向信號用的是 FilterLib 建構子預設的 H1，與進場的 M12 不一致）
 //   * ⚠️ 各商品指標參數是在 M12 上調整的，改用其他週期請重新回測/最佳化
+//
+//  v5.7  每小時市場行情判定（MarketRegime.mqh，依《期貨當沖》切入點表 + 斐波納契）
+//   * 每根 H1 K棒（每小時）對每個商品判定 多頭/空頭/盤整，計算斐波回檔位、支撐與壓力
+//   * 結果寫入日誌、圖表面板，並累積到 Common\Files\MarketRegime\ 的 CSV
+//   * Inp_MR_Mode 預設只收集；可選「順勢」或「順勢+避開斐波壓力/支撐」過濾進場
 //------------------------------------------------------------------+
-#property version "5.60"
+#property version "5.70"
 #include <FilterLib_v5.mqh>
 #include <CandlePatterns.mqh>
 #include <BQ_ML.mqh>
+#include <MarketRegime.mqh>
 
 input group "=== Basic ==="
 input ENUM_TIMEFRAMES Inp_TF = PERIOD_M12; // 策略週期（進場/追蹤停損/反向平倉/型態/ML 共用）
@@ -68,6 +74,14 @@ input bool            Inp_ML_SaveModel  = true;        // 結束時儲存模型
 input bool            Inp_ML_ExportCSV  = false;       // 匯出訓練資料 CSV（給 ml/train_logit.py）
 input bool            Inp_ML_ScaleLots  = false;       // 依預估優勢調整手數（0.5~1.5倍）
 input ENUM_TIMEFRAMES Inp_ML_TF         = PERIOD_CURRENT; // 特徵計算週期（目前=同策略週期）
+
+input group "=== 每小時市場行情判定（斐波納契）==="
+input ENUM_MR_MODE    Inp_MR_Mode       = MR_LOG_ONLY; // 模式（預設只收集，不影響下單）
+input ENUM_TIMEFRAMES Inp_MR_TF         = PERIOD_H1;   // 判定週期（每根K棒判定一次，H1=每小時）
+input int             Inp_MR_SwingBars  = 120;         // 斐波波段回看K棒數
+input double          Inp_MR_FibNearATR = 0.3;         // 接近斐波壓力/支撐的距離（ATR倍數）
+input double          Inp_MR_RsiDev     = 16;          // RSI3/RSI6 乖離門檻
+input bool            Inp_MR_CSV        = true;        // 每小時結果寫入 CSV
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -135,7 +149,11 @@ CTrade         trade;
 CCandlePatterns cp;
 
 #define SYM_COUNT 7
-CBQMLFilter ml[SYM_COUNT];   // 每個商品一個 ML 模型（模型檔名含商品名稱，互不干擾）
+CBQMLFilter ml[SYM_COUNT];
+CMarketRegime mreg;
+SRegime  mr[SYM_COUNT];       // 各商品最近一次行情判定
+datetime mrBar[SYM_COUNT];    // 最近一次判定的 Inp_MR_TF K棒
+int      mrCsv=INVALID_HANDLE;   // 每個商品一個 ML 模型（模型檔名含商品名稱，互不干擾）
 #define IND_COUNT 5
 int weight[IND_COUNT] = {3,2,1,2,1};
 
@@ -318,6 +336,70 @@ bool AccountAllowed()
    return true;
 }
 
+//------------------------------------------------------------------
+// 每小時市場行情判定
+//------------------------------------------------------------------
+void OpenRegimeCsv()
+{
+   if(!Inp_MR_CSV || MQLInfoInteger(MQL_OPTIMIZATION)) return;
+
+   bool tester=(MQLInfoInteger(MQL_TESTER)!=0);
+   FolderCreate("MarketRegime",FILE_COMMON);
+   string f=StringFormat("MarketRegime\\MultiCurrency_%I64d_%s.csv",Inp_Magic,tester ? "tester" : "live");
+
+   // 回測每次重寫；實盤接續累積
+   int flags=FILE_CSV|FILE_ANSI|FILE_COMMON|FILE_WRITE|(tester ? 0 : FILE_READ);
+   mrCsv=FileOpen(f,flags,',');
+   if(mrCsv==INVALID_HANDLE)
+   {
+      PrintFormat("⚠️ 行情判定 CSV 開啟失敗 %s err=%d",f,GetLastError());
+      return;
+   }
+   FileSeek(mrCsv,0,SEEK_END);
+   if(FileSize(mrCsv)==0)
+      FileWrite(mrCsv,"time","symbol","regime","score","close","ma5","ma10","ma20","ma34",
+                "ma_align","ma34_side","ma34_slope","macd_side","macd_cross","rsi3","rsi6","rsi_signal",
+                "dev_atr","vol_ratio","swing_hi","swing_lo","swing_dir","fib_ratio",
+                "fib236","fib382","fib500","fib618","fib786","support","resistance","fib_zone","patterns");
+   PrintFormat("行情判定寫入 Common\\Files\\%s",f);
+}
+
+void UpdateRegimes()
+{
+   for(int i=0;i<SYM_COUNT;i++)
+   {
+      if(!symOk[i]) continue;
+
+      datetime t=iTime(symbols[i],Inp_MR_TF,0);
+      if(t==0 || t==mrBar[i]) continue;
+      if(!mreg.Evaluate(symbols[i],mr[i])) continue;   // 資料未備妥，下次再試
+      mrBar[i]=t;
+
+      int dg=(int)SymbolInfoInteger(symbols[i],SYMBOL_DIGITS);
+      string pat="";
+      cp.Detect(symbols[i],Inp_MR_TF,pat);
+
+      PrintFormat("📊 [%s %s] %s%s",symbols[i],EnumToString(Inp_MR_TF),mreg.Summary(mr[i],dg),
+                  pat=="" ? "" : " | 型態 "+pat);
+
+      if(mrCsv!=INVALID_HANDLE)
+      {
+         FileWrite(mrCsv,TimeToString(mr[i].time,TIME_DATE|TIME_MINUTES),symbols[i],mr[i].label,mr[i].score,
+                   DoubleToString(mr[i].close,dg),DoubleToString(mr[i].ma5,dg),DoubleToString(mr[i].ma10,dg),
+                   DoubleToString(mr[i].ma20,dg),DoubleToString(mr[i].ma34,dg),
+                   mr[i].maAlign,mr[i].ma34Side,mr[i].ma34Slope,mr[i].macdSide,(int)mr[i].macdCross,
+                   DoubleToString(mr[i].rsi3,1),DoubleToString(mr[i].rsi6,1),mr[i].rsiSignal,
+                   DoubleToString(mr[i].devATR,2),DoubleToString(mr[i].volRatio,2),
+                   DoubleToString(mr[i].swingHi,dg),DoubleToString(mr[i].swingLo,dg),mr[i].swingDir,
+                   DoubleToString(mr[i].fibRatio,3),
+                   DoubleToString(mr[i].fib[1],dg),DoubleToString(mr[i].fib[2],dg),DoubleToString(mr[i].fib[3],dg),
+                   DoubleToString(mr[i].fib[4],dg),DoubleToString(mr[i].fib[5],dg),
+                   DoubleToString(mr[i].support,dg),DoubleToString(mr[i].resistance,dg),mr[i].fibZone,pat);
+         FileFlush(mrCsv);
+      }
+   }
+}
+
 void ReleaseHandles(int i)
 {
    if(H[i].ef   !=INVALID_HANDLE) IndicatorRelease(H[i].ef);
@@ -351,6 +433,12 @@ int OnInit()
    cp.StrictGap =Inp_CP_StrictGap;
    cp.ConfirmAll=Inp_CP_ConfirmAll;
    cp.SetDisabled(Inp_CP_Disable);
+
+   mreg.TF          =Inp_MR_TF;
+   mreg.SwingBars   =Inp_MR_SwingBars;
+   mreg.FibNearATR  =Inp_MR_FibNearATR;
+   mreg.RsiDevLimit =Inp_MR_RsiDev;
+   OpenRegimeCsv();
 
    ENUM_TIMEFRAMES mlTF=(Inp_ML_TF==PERIOD_CURRENT ? g_tf : Inp_ML_TF);
 
@@ -388,6 +476,7 @@ int OnInit()
       string s=symbols[i];
       symOk[i]=false;
       lastBarTime[i]=0;
+      mrBar[i]=0; mr[i].valid=false;
       cpBarTime[i]=0; cpDir[i]=0; cpNames[i]=""; cpExitBar[i]=0;
       H[i].ef=INVALID_HANDLE;  H[i].es=INVALID_HANDLE;   H[i].rsi=INVALID_HANDLE;
       H[i].bb=INVALID_HANDLE;  H[i].macd=INVALID_HANDLE; H[i].stoch=INVALID_HANDLE;
@@ -416,6 +505,8 @@ int OnInit()
       symOk[i]=true;
       okCount++;
 
+      mreg.Prepare(s);
+
       ml[i].Init("MultiCurrency",s,mlTF,Inp_Magic,Inp_ML_Mode,Inp_ML_Threshold,Inp_ML_MinSamples,
                  Inp_ML_BarrierTP,Inp_ML_BarrierSL,Inp_ML_MaxBars,
                  Inp_ML_LoadModel,Inp_ML_SaveModel,Inp_ML_ExportCSV,Inp_ML_ScaleLots);
@@ -430,7 +521,7 @@ int OnInit()
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
 
-   PrintFormat("EA v5.6 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
+   PrintFormat("EA v5.7 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
@@ -442,6 +533,9 @@ void OnDeinit(const int reason)
    for(int i=0;i<SYM_COUNT;i++)
       if(symOk[i]) ml[i].Deinit();
    BQ_ReleaseIndicators();
+
+   if(mrCsv!=INVALID_HANDLE) { FileClose(mrCsv); mrCsv=INVALID_HANDLE; }
+   mreg.Release();
 
    filter.DeinitIndicators();
    cp.Release();
@@ -752,6 +846,21 @@ void TryOpenPositions()
          }
       }
 
+      // 每小時行情判定過濾（順勢 / 避開斐波壓力支撐）
+      if(sig!=0 && Inp_MR_Mode!=MR_LOG_ONLY)
+      {
+         string why="";
+         double px=(sig>0) ? SymbolInfoDouble(symbols[i],SYMBOL_ASK) : SymbolInfoDouble(symbols[i],SYMBOL_BID);
+         if(!mreg.Allow(mr[i],Inp_MR_Mode,sig,px,why))
+         {
+            if(!MQLInfoInteger(MQL_OPTIMIZATION))
+               PrintFormat("📊 %s %s訊號被行情判定擋掉：%s",symbols[i],sig>0 ? "多" : "空",why);
+            MarkBarUsed(i);   // 這根K棒不再重複評估
+            sig=0;
+            confirm=0;
+         }
+      }
+
       sigArr[i]  = sig;
       confArr[i] = confirm;
    }
@@ -802,6 +911,8 @@ void RunCycle()
    for(int i=0;i<SYM_COUNT;i++)
       if(symOk[i]) ml[i].OnTick();
 
+   UpdateRegimes();
+
    filter.MonitorPositions();
    CheckPatternExit();
    TryOpenPositions();
@@ -814,12 +925,17 @@ void RunCycle()
    string symList="";
    string cpInfo="";
    string mlInfo="";
+   string mrInfo="";
    for(int i=0;i<SYM_COUNT;i++)
    {
       if(!symOk[i]) continue;
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
       symList+=(symList=="" ? "" : "/")+symbols[i];
       if(cpNames[i]!="") cpInfo+=symbols[i]+": "+cpNames[i]+"\n";
+      if(mr[i].valid)
+         mrInfo+=StringFormat("%s %s(%+d) %s S=%.*f R=%.*f\n",symbols[i],mr[i].label,mr[i].score,mr[i].fibZone,
+                              (int)SymbolInfoInteger(symbols[i],SYMBOL_DIGITS),mr[i].support,
+                              (int)SymbolInfoInteger(symbols[i],SYMBOL_DIGITS),mr[i].resistance);
       if(Inp_ML_Mode!=BQML_OFF) mlInfo+=StringFormat("%s p=%.2f  ",symbols[i],ml[i].LastProb());
    }
    string reportSym=Inp_Sym1;
@@ -827,12 +943,13 @@ void RunCycle()
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.6  週期="+EnumToString(g_tf)+"\n",
+      "MultiCurrency EA v5.7  週期="+EnumToString(g_tf)+"\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
       "K線型態("+EnumToString(Inp_CP_Mode)+"):\n"+(cpInfo=="" ? "  無\n" : cpInfo),
-      "ML("+EnumToString(Inp_ML_Mode)+"): "+(mlInfo=="" ? "關閉" : mlInfo)+"\n\n",
+      "ML("+EnumToString(Inp_ML_Mode)+"): "+(mlInfo=="" ? "關閉" : mlInfo)+"\n",
+      "行情("+EnumToString(Inp_MR_TF)+" "+EnumToString(Inp_MR_Mode)+"):\n"+(mrInfo=="" ? "  計算中\n" : mrInfo)+"\n",
       filter.GetStatusReport(reportSym)
    );
 }
