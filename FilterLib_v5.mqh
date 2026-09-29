@@ -648,6 +648,14 @@ public:
       }
    }
 
+   // 策略週期：F段反向信號、追蹤停損擺動點都用這個週期，需在 InitIndicators 之前呼叫
+   void SetTimeframe(ENUM_TIMEFRAMES tf)
+   {
+      m_tf = (tf == PERIOD_CURRENT) ? (ENUM_TIMEFRAMES)_Period : tf;
+   }
+
+   ENUM_TIMEFRAMES Timeframe() { return m_tf; }
+
    //-----------------------------------------------------------------
    // InitIndicators / DeinitIndicators（供EA OnInit/OnDeinit）
    //-----------------------------------------------------------------
@@ -919,10 +927,10 @@ public:
       ArraySetAsSeries(closeBuf, true);
 
       int bars = 30;
-      int gotHigh  = CopyHigh(sym, PERIOD_M12, 1, bars, highBuf);
-      int gotLow   = CopyLow(sym, PERIOD_M12, 1, bars, lowBuf);
-      int gotOpen  = CopyOpen(sym, PERIOD_M12, 1, bars, openBuf);
-      int gotClose = CopyClose(sym, PERIOD_M12, 1, bars, closeBuf);
+      int gotHigh  = CopyHigh(sym, m_tf, 1, bars, highBuf);
+      int gotLow   = CopyLow(sym, m_tf, 1, bars, lowBuf);
+      int gotOpen  = CopyOpen(sym, m_tf, 1, bars, openBuf);
+      int gotClose = CopyClose(sym, m_tf, 1, bars, closeBuf);
 
       // 剛訂閱/歷史資料尚未補齊時，Copy* 可能回傳少於 bars 根，
       // 迴圈只能掃到實際回傳的最小根數，避免陣列越界

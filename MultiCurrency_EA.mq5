@@ -20,13 +20,19 @@
 //   * 機率 >= 兩平勝率 + Inp_ML_Threshold 才放行；前 Inp_ML_MinSamples 個訊號只學習不過濾
 //   * 每個訊號（含被擋掉、沒被選中的）都建立虛擬單追蹤標記，避免選擇偏誤
 //   * 模型存在 Common\Files\BeeQuantML\，可匯出 CSV 用 ml/train_logit.py 離線訓練
+//
+//  v5.6  策略週期改為參數 Inp_TF（預設 M15，原本寫死 M12）
+//   * 進場指標、新K棒判斷、追蹤停損擺動點、F段反向信號平倉、K線型態、ML 全部使用同一週期
+//     （原本 F段反向信號用的是 FilterLib 建構子預設的 H1，與進場的 M12 不一致）
+//   * ⚠️ 各商品指標參數原本是在 M12 上調整的，改週期後請重新回測/最佳化
 //------------------------------------------------------------------+
-#property version "5.50"
+#property version "5.60"
 #include <FilterLib_v5.mqh>
 #include <CandlePatterns.mqh>
 #include <BQ_ML.mqh>
 
 input group "=== Basic ==="
+input ENUM_TIMEFRAMES Inp_TF = PERIOD_M15; // 策略週期（進場/追蹤停損/反向平倉/型態/ML 共用）
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
@@ -37,7 +43,7 @@ input long Inp_LockAccount = 0;    // 只允許此帳號執行（0 = 不限）
 
 input group "=== K線型態濾網（翻多16招/翻空18招）==="
 input ENUM_CP_MODE    Inp_CP_Mode          = CP_VETO;    // 濾網模式
-input ENUM_TIMEFRAMES Inp_CP_TF            = PERIOD_M12; // 型態判斷週期
+input ENUM_TIMEFRAMES Inp_CP_TF            = PERIOD_CURRENT; // 型態判斷週期（目前=同策略週期）
 input int             Inp_CP_Weight        = 2;          // 計分模式的權重
 input bool            Inp_CP_ExitOnReverse = false;      // 持倉出現反向型態時平倉
 input bool            Inp_CP_ConfirmAll    = false;      // 所有型態都要下一根K棒突破/跌破確認
@@ -61,7 +67,7 @@ input bool            Inp_ML_LoadModel  = true;        // 啟動時載入已存�
 input bool            Inp_ML_SaveModel  = true;        // 結束時儲存模型
 input bool            Inp_ML_ExportCSV  = false;       // 匯出訓練資料 CSV（給 ml/train_logit.py）
 input bool            Inp_ML_ScaleLots  = false;       // 依預估優勢調整手數（0.5~1.5倍）
-input ENUM_TIMEFRAMES Inp_ML_TF         = PERIOD_M12;  // 特徵計算週期（建議與策略週期 M12 相同）
+input ENUM_TIMEFRAMES Inp_ML_TF         = PERIOD_CURRENT; // 特徵計算週期（目前=同策略週期）
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -123,6 +129,8 @@ input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 
 //------------------------------------------------------------------
 CFilterLib_Pro filter(Inp_Magic);
+ENUM_TIMEFRAMES g_tf   = PERIOD_M15;   // 實際策略週期（OnInit 由 Inp_TF 決定）
+ENUM_TIMEFRAMES g_cpTF = PERIOD_M15;   // 實際型態週期
 CTrade         trade;
 CCandlePatterns cp;
 
@@ -147,7 +155,7 @@ int    g_ros[SYM_COUNT],g_rob[SYM_COUNT];
 
 struct SCandidate { int si; int sig; double atr; int confirm; };
 
-// K線型態結果快取：同一根 Inp_CP_TF K棒只計算一次
+// K線型態結果快取：同一根型態週期K棒只計算一次
 datetime cpBarTime[SYM_COUNT];
 int      cpDir[SYM_COUNT];
 string   cpNames[SYM_COUNT];
@@ -156,16 +164,16 @@ datetime cpExitBar[SYM_COUNT];   // 反向型態平倉：每根K棒只處理一�
 // 回傳該商品最近完成的型態方向 (+1 翻多 / -1 翻空 / 0 無)
 int GetPattern(int si)
 {
-   datetime t=iTime(symbols[si],Inp_CP_TF,0);
+   datetime t=iTime(symbols[si],g_cpTF,0);
    if(t==0) return 0;
    if(t!=cpBarTime[si])
    {
       string names="";
-      cpDir[si]=cp.Detect(symbols[si],Inp_CP_TF,names);
+      cpDir[si]=cp.Detect(symbols[si],g_cpTF,names);
       cpNames[si]=names;
       cpBarTime[si]=t;
       if(names!="")
-         PrintFormat("🕯 %s %s 型態：%s",symbols[si],EnumToString(Inp_CP_TF),names);
+         PrintFormat("🕯 %s %s 型態：%s",symbols[si],EnumToString(g_cpTF),names);
    }
    return cpDir[si];
 }
@@ -205,13 +213,13 @@ void CheckPatternExit()
 //------------------------------------------------------------------
 bool CheckNewBar(int idx)
 {
-   datetime cur=iTime(symbols[idx],PERIOD_M12,0);
+   datetime cur=iTime(symbols[idx],g_tf,0);
    return (cur!=lastBarTime[idx]);
 }
 
 void MarkBarUsed(int idx)
 {
-   lastBarTime[idx]=iTime(symbols[idx],PERIOD_M12,0);
+   lastBarTime[idx]=iTime(symbols[idx],g_tf,0);
 }
 
 int CountPos()
@@ -330,6 +338,10 @@ int OnInit()
 
    trade.SetExpertMagicNumber(Inp_Magic);
 
+   g_tf  =(Inp_TF==PERIOD_CURRENT ? (ENUM_TIMEFRAMES)_Period : Inp_TF);
+   g_cpTF=(Inp_CP_TF==PERIOD_CURRENT ? g_tf : Inp_CP_TF);
+   filter.SetTimeframe(g_tf);
+
    cp.TrendBars =Inp_CP_TrendBars;
    cp.TrendATR  =Inp_CP_TrendATR;
    cp.LongATR   =Inp_CP_LongATR;
@@ -340,7 +352,7 @@ int OnInit()
    cp.ConfirmAll=Inp_CP_ConfirmAll;
    cp.SetDisabled(Inp_CP_Disable);
 
-   ENUM_TIMEFRAMES mlTF=(Inp_ML_TF==PERIOD_CURRENT ? PERIOD_M12 : Inp_ML_TF);
+   ENUM_TIMEFRAMES mlTF=(Inp_ML_TF==PERIOD_CURRENT ? g_tf : Inp_ML_TF);
 
    if(!filter.InitIndicators())
       return INIT_FAILED;
@@ -386,12 +398,12 @@ int OnInit()
          continue;
       }
 
-      H[i].ef   =iMA(s,PERIOD_M12,g_ef[i],0,MODE_EMA,PRICE_CLOSE);
-      H[i].es   =iMA(s,PERIOD_M12,g_es[i],0,MODE_EMA,PRICE_CLOSE);
-      H[i].rsi  =iRSI(s,PERIOD_M12,g_rp[i],PRICE_CLOSE);
-      H[i].bb   =iBands(s,PERIOD_M12,g_bp[i],0,g_bs[i],PRICE_CLOSE);
-      H[i].macd =iMACD(s,PERIOD_M12,g_mf[i],g_ms[i],g_mg[i],PRICE_CLOSE);
-      H[i].stoch=iStochastic(s,PERIOD_M12,g_kp[i],g_kk[i],g_kd[i],MODE_SMA,STO_LOWHIGH);
+      H[i].ef   =iMA(s,g_tf,g_ef[i],0,MODE_EMA,PRICE_CLOSE);
+      H[i].es   =iMA(s,g_tf,g_es[i],0,MODE_EMA,PRICE_CLOSE);
+      H[i].rsi  =iRSI(s,g_tf,g_rp[i],PRICE_CLOSE);
+      H[i].bb   =iBands(s,g_tf,g_bp[i],0,g_bs[i],PRICE_CLOSE);
+      H[i].macd =iMACD(s,g_tf,g_mf[i],g_ms[i],g_mg[i],PRICE_CLOSE);
+      H[i].stoch=iStochastic(s,g_tf,g_kp[i],g_kk[i],g_kd[i],MODE_SMA,STO_LOWHIGH);
       if(H[i].ef==INVALID_HANDLE||H[i].es==INVALID_HANDLE||
          H[i].rsi==INVALID_HANDLE||H[i].bb==INVALID_HANDLE||
          H[i].macd==INVALID_HANDLE||H[i].stoch==INVALID_HANDLE)
@@ -418,7 +430,7 @@ int OnInit()
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
 
-   PrintFormat("EA v5.5 started（%d/%d 個商品可交易）",okCount,SYM_COUNT);
+   PrintFormat("EA v5.6 started（週期 %s，%d/%d 個商品可交易）",EnumToString(g_tf),okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
@@ -446,7 +458,7 @@ int GetOneSignal(int si,int indType)
 if(indType==0)
 {
    double ef[3],es[3];
-   double c0=iClose(symbols[si],PERIOD_M12,1);
+   double c0=iClose(symbols[si],g_tf,1);
 
    if(CopyBuffer(H[si].ef,0,1,3,ef)<3) return 0;
    if(CopyBuffer(H[si].es,0,1,3,es)<3) return 0;
@@ -531,8 +543,8 @@ if(indType==2)
    if(CopyBuffer(H[si].bb,1,1,2,up)<2)  return 0;
    if(CopyBuffer(H[si].bb,2,1,2,lo)<2)  return 0;
 
-   double c0=iClose(symbols[si],PERIOD_M12,1);
-   double c1=iClose(symbols[si],PERIOD_M12,2);
+   double c0=iClose(symbols[si],g_tf,1);
+   double c1=iClose(symbols[si],g_tf,2);
 
    double bw0=up[0]-lo[0];
    double bw1=up[1]-lo[1];
@@ -815,7 +827,7 @@ void RunCycle()
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.5\n",
+      "MultiCurrency EA v5.6  週期="+EnumToString(g_tf)+"\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
