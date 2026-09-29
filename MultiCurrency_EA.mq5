@@ -10,9 +10,14 @@
 //   * 每秒 OnTimer 檢查一次：其他商品不會觸發圖表的 OnTick，原本只有圖表商品跳動時才掃描
 //   * 帳戶保護：可限定帳號、可禁止在真實帳戶執行
 //   * 移除沒有使用、且每次呼叫都建立/釋放 ATR handle 的 GetAtrPips()
+//
+//  v5.4  K線型態濾網（CandlePatterns.mqh：翻多16招 + 翻空18招）
+//   * Inp_CP_Mode：關閉 / 反向型態擋單 / 必須同向型態 / 當第6個指標加權
+//   * Inp_CP_ExitOnReverse：持倉出現反向型態時主動平倉
 //------------------------------------------------------------------+
-#property version "5.30"
+#property version "5.40"
 #include <FilterLib_v5.mqh>
+#include <CandlePatterns.mqh>
 
 input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
@@ -22,6 +27,21 @@ input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
 input group "=== Account Protection ==="
 input bool Inp_AllowReal   = true; // 允許在真實帳戶執行（false = 只在模擬帳戶執行）
 input long Inp_LockAccount = 0;    // 只允許此帳號執行（0 = 不限）
+
+input group "=== K線型態濾網（翻多16招/翻空18招）==="
+input ENUM_CP_MODE    Inp_CP_Mode          = CP_VETO;    // 濾網模式
+input ENUM_TIMEFRAMES Inp_CP_TF            = PERIOD_M12; // 型態判斷週期
+input int             Inp_CP_Weight        = 2;          // 計分模式的權重
+input bool            Inp_CP_ExitOnReverse = false;      // 持倉出現反向型態時平倉
+input bool            Inp_CP_ConfirmAll    = false;      // 所有型態都要下一根K棒突破/跌破確認
+input bool            Inp_CP_StrictGap     = false;      // 跳空用高低點判斷（false=實體跳空，外匯建議）
+input int             Inp_CP_TrendBars     = 5;          // 趨勢回看K棒數
+input double          Inp_CP_TrendATR      = 1.0;        // 趨勢最小幅度（ATR倍數）
+input double          Inp_CP_LongATR       = 0.7;        // 長紅/長黑 實體 >= ATR倍數
+input double          Inp_CP_SmallATR      = 0.35;       // 小K 實體 <= ATR倍數
+input double          Inp_CP_DojiATR       = 0.12;       // 十字/變盤線 實體 <= ATR倍數
+input double          Inp_CP_NearATR       = 0.15;       // 「相近」容許誤差（ATR倍數）
+input string          Inp_CP_Disable       = "";         // 停用的型態代碼，例如 B5,S7
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -84,6 +104,7 @@ input int    S7_KP=14;    input int    S7_KK=3;       input int S7_KD=3;
 //------------------------------------------------------------------
 CFilterLib_Pro filter(Inp_Magic);
 CTrade         trade;
+CCandlePatterns cp;
 
 #define SYM_COUNT 7
 #define IND_COUNT 5
@@ -104,6 +125,61 @@ int    g_kp[SYM_COUNT],g_kk[SYM_COUNT],g_kd[SYM_COUNT];
 int    g_ros[SYM_COUNT],g_rob[SYM_COUNT];
 
 struct SCandidate { int si; int sig; double atr; int confirm; };
+
+// K線型態結果快取：同一根 Inp_CP_TF K棒只計算一次
+datetime cpBarTime[SYM_COUNT];
+int      cpDir[SYM_COUNT];
+string   cpNames[SYM_COUNT];
+datetime cpExitBar[SYM_COUNT];   // 反向型態平倉：每根K棒只處理一次
+
+// 回傳該商品最近完成的型態方向 (+1 翻多 / -1 翻空 / 0 無)
+int GetPattern(int si)
+{
+   datetime t=iTime(symbols[si],Inp_CP_TF,0);
+   if(t==0) return 0;
+   if(t!=cpBarTime[si])
+   {
+      string names="";
+      cpDir[si]=cp.Detect(symbols[si],Inp_CP_TF,names);
+      cpNames[si]=names;
+      cpBarTime[si]=t;
+      if(names!="")
+         PrintFormat("🕯 %s %s 型態：%s",symbols[si],EnumToString(Inp_CP_TF),names);
+   }
+   return cpDir[si];
+}
+
+// 持倉出現反向K線型態時主動平倉
+void CheckPatternExit()
+{
+   if(Inp_CP_Mode==CP_OFF || !Inp_CP_ExitOnReverse) return;
+
+   for(int si=0;si<SYM_COUNT;si++)
+   {
+      if(!symOk[si]) continue;
+      int pd=GetPattern(si);
+      if(pd==0 || cpExitBar[si]==cpBarTime[si]) continue;
+      cpExitBar[si]=cpBarTime[si];
+
+      for(int i=PositionsTotal()-1;i>=0;i--)
+      {
+         ulong ticket=PositionGetTicket(i);
+         if(ticket==0) continue;
+         if(PositionGetString(POSITION_SYMBOL)!=symbols[si]) continue;
+         if(PositionGetInteger(POSITION_MAGIC)!=Inp_Magic) continue;
+
+         int dir=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY) ? 1 : -1;
+         if(dir!=-pd) continue;
+
+         trade.SetTypeFillingBySymbol(symbols[si]);
+         if(trade.PositionClose(ticket) &&
+            (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
+            PrintFormat("🕯 %s 反向型態 %s → 平倉 #%I64u",symbols[si],cpNames[si],ticket);
+         else
+            PrintFormat("❌ %s 反向型態平倉失敗 retcode=%u",symbols[si],trade.ResultRetcode());
+      }
+   }
+}
 
 //------------------------------------------------------------------
 bool CheckNewBar(int idx)
@@ -233,6 +309,16 @@ int OnInit()
 
    trade.SetExpertMagicNumber(Inp_Magic);
 
+   cp.TrendBars =Inp_CP_TrendBars;
+   cp.TrendATR  =Inp_CP_TrendATR;
+   cp.LongATR   =Inp_CP_LongATR;
+   cp.SmallATR  =Inp_CP_SmallATR;
+   cp.DojiATR   =Inp_CP_DojiATR;
+   cp.NearATR   =Inp_CP_NearATR;
+   cp.StrictGap =Inp_CP_StrictGap;
+   cp.ConfirmAll=Inp_CP_ConfirmAll;
+   cp.SetDisabled(Inp_CP_Disable);
+
    if(!filter.InitIndicators())
       return INIT_FAILED;
 
@@ -267,6 +353,7 @@ int OnInit()
       string s=symbols[i];
       symOk[i]=false;
       lastBarTime[i]=0;
+      cpBarTime[i]=0; cpDir[i]=0; cpNames[i]=""; cpExitBar[i]=0;
       H[i].ef=INVALID_HANDLE;  H[i].es=INVALID_HANDLE;   H[i].rsi=INVALID_HANDLE;
       H[i].bb=INVALID_HANDLE;  H[i].macd=INVALID_HANDLE; H[i].stoch=INVALID_HANDLE;
 
@@ -304,7 +391,7 @@ int OnInit()
    // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
    EventSetTimer(1);
 
-   PrintFormat("EA v5.3 started（%d/%d 個商品可交易）",okCount,SYM_COUNT);
+   PrintFormat("EA v5.4 started（%d/%d 個商品可交易）",okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
@@ -312,6 +399,7 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    filter.DeinitIndicators();
+   cp.Release();
 
    for(int i=0;i<SYM_COUNT;i++)
       ReleaseHandles(i);
@@ -536,18 +624,34 @@ void GetSignalWithConfirm(int si, int &sig, int &confirm)
          sellScore+=weight[t];
    }
 
+   int pd=(Inp_CP_Mode==CP_OFF) ? 0 : GetPattern(si);
+
+   // 計分模式：K線型態當作第6個指標
+   if(Inp_CP_Mode==CP_SCORE)
+   {
+      if(pd== 1) buyScore +=Inp_CP_Weight;
+      if(pd==-1) sellScore+=Inp_CP_Weight;
+   }
+
    if(buyScore>=Inp_MinConfirm && buyScore>sellScore)
    {
       sig=1;
       confirm=buyScore;
-      return;
    }
-
-   if(sellScore>=Inp_MinConfirm && sellScore>buyScore)
+   else if(sellScore>=Inp_MinConfirm && sellScore>buyScore)
    {
       sig=-1;
       confirm=sellScore;
-      return;
+   }
+
+   if(sig==0) return;
+
+   // 擋單模式：出現反向型態不進場；必須模式：沒有同向型態不進場
+   if((Inp_CP_Mode==CP_VETO    && pd==-sig) ||
+      (Inp_CP_Mode==CP_REQUIRE && pd!= sig))
+   {
+      sig=0;
+      confirm=0;
    }
 }
 
@@ -637,6 +741,7 @@ void TryOpenPositions()
 void RunCycle()
 {
    filter.MonitorPositions();
+   CheckPatternExit();
    TryOpenPositions();
 
    // 回測不繪製面板，節省時間
@@ -645,21 +750,24 @@ void RunCycle()
 
    string posInfo="";
    string symList="";
+   string cpInfo="";
    for(int i=0;i<SYM_COUNT;i++)
    {
       if(!symOk[i]) continue;
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
       symList+=(symList=="" ? "" : "/")+symbols[i];
+      if(cpNames[i]!="") cpInfo+=symbols[i]+": "+cpNames[i]+"\n";
    }
    string reportSym=Inp_Sym1;
    for(int i=0;i<SYM_COUNT;i++)
       if(symOk[i]) { reportSym=symbols[i]; break; }
 
    Comment(
-      "MultiCurrency EA v5.3\n",
+      "MultiCurrency EA v5.4\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
       symList+"\n",
-     "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
+     "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n",
+      "K線型態("+EnumToString(Inp_CP_Mode)+"):\n"+(cpInfo=="" ? "  無\n" : cpInfo)+"\n",
       filter.GetStatusReport(reportSym)
    );
 }
