@@ -1,16 +1,27 @@
 //+------------------------------------------------------------------+
-//  MultiCurrency_EA.mq5  v5.2
+//  MultiCurrency_EA.mq5  v5.3
 //  7幣別平等競爭，ATR動能排序
 //  5個指標全部同向 → 訂單上限由FilterLib控制
 //  風控全部由 FilterLib_v5.mqh 處理
+//
+//  v5.3（參考 BeeQuant12 共用函式庫的修正）
+//   * 券商商品名稱自動對應後綴/前綴（USDJPY → USDJPY.m 等）；找不到的商品略過，不再整支 EA 啟動失敗
+//   * 下單改走 filter.OpenMarket：成交模式、手數步進、最小停損距離、retcode 檢查與重試
+//   * 每秒 OnTimer 檢查一次：其他商品不會觸發圖表的 OnTick，原本只有圖表商品跳動時才掃描
+//   * 帳戶保護：可限定帳號、可禁止在真實帳戶執行
+//   * 移除沒有使用、且每次呼叫都建立/釋放 ATR handle 的 GetAtrPips()
 //------------------------------------------------------------------+
-#property version "5.20"
+#property version "5.30"
 #include <FilterLib_v5.mqh>
 
 input group "=== Basic ==="
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
+
+input group "=== Account Protection ==="
+input bool Inp_AllowReal   = true; // 允許在真實帳戶執行（false = 只在模擬帳戶執行）
+input long Inp_LockAccount = 0;    // 只允許此帳號執行（0 = 不限）
 
 input group "=== Symbols ==="
 input string Inp_Sym1 = "USDJPY";
@@ -79,6 +90,7 @@ CTrade         trade;
 int weight[IND_COUNT] = {3,2,1,2,1};
 
 string   symbols[SYM_COUNT];
+bool     symOk[SYM_COUNT];      // 券商有此商品且指標建立成功
 datetime lastBarTime[SYM_COUNT];
 int startIndex=0;
 
@@ -140,33 +152,100 @@ bool HasPos(string sym)
    return false;
 }
 
-double GetAtrPips(int si)
+// 找券商實際的商品名稱（處理後綴/前綴，例如 USDJPY → USDJPY.m / USDJPYpro / m.USDJPY），
+// 並加入 Market Watch；找不到回傳 ""（參考 BeeQuant12 BQ_Multi.mqh）
+string ResolveSymbol(string want)
 {
-   int h=iATR(symbols[si],PERIOD_M12,14);
-   if(h==INVALID_HANDLE) return 0;
-   double buf[]; ArraySetAsSeries(buf,true);
-   double atr=0;
-   if(CopyBuffer(h,0,1,1,buf)>0)
+   StringTrimLeft(want);
+   StringTrimRight(want);
+   if(want=="") return "";
+
+   bool custom=false;
+   if(SymbolExist(want,custom))
    {
-      int d=(int)SymbolInfoInteger(symbols[si],SYMBOL_DIGITS);
-      double pip=(d==2||d==3)?0.01:0.0001;
-      atr=buf[0]/pip;
+      SymbolSelect(want,true);
+      return want;
    }
-   IndicatorRelease(h);
-   return atr;
+
+   string up=want;
+   StringToUpper(up);
+   string best="";
+   bool   bestSel=false;
+
+   for(int i=0;i<SymbolsTotal(false);i++)
+   {
+      string name=SymbolName(i,false);
+      string u=name;
+      StringToUpper(u);
+      int p=StringFind(u,up);
+      if(p<0 || p>3) continue;   // 只接受短前綴
+
+      bool sel=(SymbolInfoInteger(name,SYMBOL_SELECT)!=0);
+      if(best=="" || (sel && !bestSel) || (sel==bestSel && StringLen(name)<StringLen(best)))
+      {
+         best=name;
+         bestSel=sel;
+      }
+   }
+
+   if(best!="") SymbolSelect(best,true);
+   return best;
+}
+
+bool AccountAllowed()
+{
+   long login=AccountInfoInteger(ACCOUNT_LOGIN);
+
+   if(Inp_LockAccount!=0 && login!=Inp_LockAccount)
+   {
+      PrintFormat("帳戶保護：目前帳號 %I64d 不是指定帳號 %I64d，EA 不啟動",login,Inp_LockAccount);
+      return false;
+   }
+
+   if(!Inp_AllowReal &&
+      (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE)==ACCOUNT_TRADE_MODE_REAL)
+   {
+      PrintFormat("帳戶保護：帳號 %I64d 是真實帳戶，Inp_AllowReal=false，EA 不啟動",login);
+      Alert("EA 未啟動：這是真實帳戶（要在真實帳戶執行請把 Inp_AllowReal 設為 true）");
+      return false;
+   }
+
+   return true;
+}
+
+void ReleaseHandles(int i)
+{
+   if(H[i].ef   !=INVALID_HANDLE) IndicatorRelease(H[i].ef);
+   if(H[i].es   !=INVALID_HANDLE) IndicatorRelease(H[i].es);
+   if(H[i].rsi  !=INVALID_HANDLE) IndicatorRelease(H[i].rsi);
+   if(H[i].bb   !=INVALID_HANDLE) IndicatorRelease(H[i].bb);
+   if(H[i].macd !=INVALID_HANDLE) IndicatorRelease(H[i].macd);
+   if(H[i].stoch!=INVALID_HANDLE) IndicatorRelease(H[i].stoch);
+   H[i].ef=INVALID_HANDLE;  H[i].es=INVALID_HANDLE;   H[i].rsi=INVALID_HANDLE;
+   H[i].bb=INVALID_HANDLE;  H[i].macd=INVALID_HANDLE; H[i].stoch=INVALID_HANDLE;
 }
 
 //------------------------------------------------------------------
 int OnInit()
 {
+   if(!MQLInfoInteger(MQL_TESTER) && !AccountAllowed())
+      return INIT_FAILED;
+
    trade.SetExpertMagicNumber(Inp_Magic);
 
    if(!filter.InitIndicators())
       return INIT_FAILED;
 
-   symbols[0]=Inp_Sym1; symbols[1]=Inp_Sym2; symbols[2]=Inp_Sym3;
-   symbols[3]=Inp_Sym4; symbols[4]=Inp_Sym5; symbols[5]=Inp_Sym6;
-   symbols[6]=Inp_Sym7;
+   string want[SYM_COUNT];
+   want[0]=Inp_Sym1; want[1]=Inp_Sym2; want[2]=Inp_Sym3;
+   want[3]=Inp_Sym4; want[4]=Inp_Sym5; want[5]=Inp_Sym6;
+   want[6]=Inp_Sym7;
+   for(int i=0;i<SYM_COUNT;i++)
+   {
+      symbols[i]=ResolveSymbol(want[i]);
+      if(symbols[i]!="" && symbols[i]!=want[i])
+         PrintFormat("商品 %s → 券商名稱 %s",want[i],symbols[i]);
+   }
 
    g_ef[0]=S1_EMA_F;   g_ef[1]=S2_EMA_F;   g_ef[2]=S3_EMA_F;   g_ef[3]=S4_EMA_F;   g_ef[4]=S5_EMA_F;   g_ef[5]=S6_EMA_F;   g_ef[6]=S7_EMA_F;
    g_es[0]=S1_EMA_S;   g_es[1]=S2_EMA_S;   g_es[2]=S3_EMA_S;   g_es[3]=S4_EMA_S;   g_es[4]=S5_EMA_S;   g_es[5]=S6_EMA_S;   g_es[6]=S7_EMA_S;
@@ -182,9 +261,21 @@ int OnInit()
    g_ros[0]=S1_RSI_OS; g_ros[1]=S2_RSI_OS; g_ros[2]=S3_RSI_OS; g_ros[3]=S4_RSI_OS; g_ros[4]=S5_RSI_OS; g_ros[5]=S6_RSI_OS; g_ros[6]=S7_RSI_OS;
    g_rob[0]=S1_RSI_OB; g_rob[1]=S2_RSI_OB; g_rob[2]=S3_RSI_OB; g_rob[3]=S4_RSI_OB; g_rob[4]=S5_RSI_OB; g_rob[5]=S6_RSI_OB; g_rob[6]=S7_RSI_OB;
 
+   int okCount=0;
    for(int i=0;i<SYM_COUNT;i++)
    {
       string s=symbols[i];
+      symOk[i]=false;
+      lastBarTime[i]=0;
+      H[i].ef=INVALID_HANDLE;  H[i].es=INVALID_HANDLE;   H[i].rsi=INVALID_HANDLE;
+      H[i].bb=INVALID_HANDLE;  H[i].macd=INVALID_HANDLE; H[i].stoch=INVALID_HANDLE;
+
+      if(s=="")
+      {
+         PrintFormat("⚠️ 商品 %s 在此券商找不到，略過",want[i]);
+         continue;
+      }
+
       H[i].ef   =iMA(s,PERIOD_M12,g_ef[i],0,MODE_EMA,PRICE_CLOSE);
       H[i].es   =iMA(s,PERIOD_M12,g_es[i],0,MODE_EMA,PRICE_CLOSE);
       H[i].rsi  =iRSI(s,PERIOD_M12,g_rp[i],PRICE_CLOSE);
@@ -194,23 +285,36 @@ int OnInit()
       if(H[i].ef==INVALID_HANDLE||H[i].es==INVALID_HANDLE||
          H[i].rsi==INVALID_HANDLE||H[i].bb==INVALID_HANDLE||
          H[i].macd==INVALID_HANDLE||H[i].stoch==INVALID_HANDLE)
-      { Print("Init failed: ",s); return INIT_FAILED; }
-      lastBarTime[i]=0;
+      {
+         PrintFormat("⚠️ %s 指標建立失敗(err=%d)，略過此商品",s,GetLastError());
+         ReleaseHandles(i);
+         continue;
+      }
+
+      symOk[i]=true;
+      okCount++;
    }
-   Print("EA v5.2 started");
+
+   if(okCount==0)
+   {
+      Print("Init failed: 沒有任何可交易的商品");
+      return INIT_FAILED;
+   }
+
+   // 其他商品不會觸發這張圖表的 OnTick，每秒另外檢查一次
+   EventSetTimer(1);
+
+   PrintFormat("EA v5.3 started（%d/%d 個商品可交易）",okCount,SYM_COUNT);
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
    filter.DeinitIndicators();
 
    for(int i=0;i<SYM_COUNT;i++)
-   {
-      IndicatorRelease(H[i].ef);   IndicatorRelease(H[i].es);
-      IndicatorRelease(H[i].rsi);  IndicatorRelease(H[i].bb);
-      IndicatorRelease(H[i].macd); IndicatorRelease(H[i].stoch);
-   }
+      ReleaseHandles(i);
 }
 
 //------------------------------------------------------------------
@@ -469,6 +573,9 @@ void TryOpenPositions()
       sigArr[i] = 0;
       confArr[i] = 0;
 
+      if(!symOk[i])
+         continue;
+
       if(!CheckNewBar(i))
          continue;
 
@@ -521,34 +628,42 @@ void TryOpenPositions()
       return;
    double lot = filter.GetLotSize(sym);
 
-   bool ok=false;
-   if(sig>0)
-      ok = trade.Buy(lot, sym, 0, sl, tp, "MC BUY");
-   else
-      ok = trade.Sell(lot, sym, 0, sl, tp, "MC SELL");
-
-   if(ok)
+   // 成交模式、手數步進、最小停損距離、retcode 檢查與重試都在 OpenMarket 處理，失敗原因會印在日誌
+   if(filter.OpenMarket(sym, sig, lot, sl, tp, sig>0 ? "MC BUY" : "MC SELL"))
       MarkBarUsed(bestIndex);
-   else
-      Print("❌ 下單失敗: ", sym, " err=", GetLastError());
 }
 
 //------------------------------------------------------------------
-void OnTick()
+void RunCycle()
 {
    filter.MonitorPositions();
    TryOpenPositions();
 
+   // 回測不繪製面板，節省時間
+   if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE))
+      return;
+
    string posInfo="";
+   string symList="";
    for(int i=0;i<SYM_COUNT;i++)
+   {
+      if(!symOk[i]) continue;
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
+      symList+=(symList=="" ? "" : "/")+symbols[i];
+   }
+   string reportSym=Inp_Sym1;
+   for(int i=0;i<SYM_COUNT;i++)
+      if(symOk[i]) { reportSym=symbols[i]; break; }
+
    Comment(
-      "MultiCurrency EA v5.2\n",
+      "MultiCurrency EA v5.3\n",
       "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
-      Inp_Sym1+"/"+Inp_Sym2+"/"+Inp_Sym3+"/"+
-      Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"\n",
+      symList+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
-      filter.GetStatusReport(symbols[0])
+      filter.GetStatusReport(reportSym)
    );
 }
+
+void OnTick()  { RunCycle(); }
+void OnTimer() { RunCycle(); }
 //+------------------------------------------------------------------+

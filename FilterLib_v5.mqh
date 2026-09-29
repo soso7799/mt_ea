@@ -125,6 +125,16 @@ private:
 
    datetime m_lastBarTimeF[SYMBOL_COUNT];
 
+   // SYMBOLS[] 對應到券商實際名稱（處理 GBPJPY.m / GBPJPYpro / m.GBPJPY 等後綴前綴），
+   // 找不到則為 ""，F段背景監控會略過該商品
+   string   m_symName[SYMBOL_COUNT];
+
+   // ATR(M1,1) handle 快取：原本 IsVolatilityNormal / GetStatusReport 每次呼叫都
+   // iATR() 建立新 handle 再立即釋放，新 handle 通常還沒算好，CopyBuffer 失敗就直接放行，
+   // 等於波動過濾從未生效（參考 BeeQuant12 BQ_Indicators.mqh 的修正）
+   string   m_atrSym[];
+   int      m_atrH[];
+
    datetime lastResetDay;
    bool     forceClosedToday;
 
@@ -181,6 +191,149 @@ private:
       return s;
    }
 
+   //-----------------------------------------------------------------
+   // 券商商品名稱對應（參考 BeeQuant12 BQ_Multi.mqh）
+   //-----------------------------------------------------------------
+   string _resolveName(string want)
+   {
+      bool custom = false;
+      if(SymbolExist(want, custom))
+      {
+         SymbolSelect(want, true);
+         return want;
+      }
+
+      string up = want;
+      StringToUpper(up);
+      string best    = "";
+      bool   bestSel = false;
+
+      for(int i=0; i<SymbolsTotal(false); i++)
+      {
+         string name = SymbolName(i, false);
+         string u    = name;
+         StringToUpper(u);
+         int p = StringFind(u, up);
+         if(p < 0 || p > 3) continue;          // 只接受短前綴，例如 m.GBPJPY
+
+         bool sel = (SymbolInfoInteger(name, SYMBOL_SELECT) != 0);
+         if(best == "" || (sel && !bestSel) || (sel == bestSel && StringLen(name) < StringLen(best)))
+         {
+            best    = name;
+            bestSel = sel;
+         }
+      }
+
+      if(best != "") SymbolSelect(best, true);
+      return best;
+   }
+
+   // 依券商實際名稱找 SYMBOLS[] 索引
+   int _idxOf(string sym)
+   {
+      for(int i=0; i<SYMBOL_COUNT; i++)
+         if(m_symName[i] != "" && m_symName[i] == sym) return i;
+      return SymIdx(sym);
+   }
+
+   int _atrHandle(string sym)
+   {
+      for(int i=0; i<ArraySize(m_atrSym); i++)
+         if(m_atrSym[i] == sym) return m_atrH[i];
+
+      int h = iATR(sym, PERIOD_M1, 1);
+      if(h == INVALID_HANDLE) return INVALID_HANDLE;
+
+      int n = ArraySize(m_atrSym);
+      ArrayResize(m_atrSym, n+1);
+      ArrayResize(m_atrH,   n+1);
+      m_atrSym[n] = sym;
+      m_atrH[n]   = h;
+      return h;
+   }
+
+   // 取 ATR(M1,1) pips；取值失敗回傳 false（handle 剛建立尚未計算完成時常見）
+   bool _atrPips(string sym, double &atrPips)
+   {
+      int h = _atrHandle(sym);
+      if(h == INVALID_HANDLE) return false;
+
+      double buf[1];
+      if(CopyBuffer(h, 0, 0, 1, buf) != 1) return false;
+      if(buf[0] == EMPTY_VALUE || !MathIsValidNumber(buf[0])) return false;
+
+      atrPips = buf[0] / PipSize(sym);
+      return true;
+   }
+
+   //-----------------------------------------------------------------
+   // 下單安全工具（參考 BeeQuant12 BQ_Trade.mqh）
+   //-----------------------------------------------------------------
+   int _volDigits(string sym)
+   {
+      double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      int d = 0;
+      while(step > 0 && step < 1.0-1e-9 && d < 8) { step *= 10.0; d++; }
+      return d;
+   }
+
+   double _normPrice(string sym, double p)
+   {
+      int    dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      double ts = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+      if(ts <= 0) return NormalizeDouble(p, dg);
+      return NormalizeDouble(MathRound(p/ts)*ts, dg);
+   }
+
+   // 券商允許的最小 SL/TP 距離（STOPS_LEVEL 與 FREEZE_LEVEL 取大者）
+   double _minStopDist(string sym)
+   {
+      long lvl = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+      long frz = SymbolInfoInteger(sym, SYMBOL_TRADE_FREEZE_LEVEL);
+      return (double)MathMax(lvl, frz) * SymbolInfoDouble(sym, SYMBOL_POINT);
+   }
+
+   // 把太靠近的 SL/TP 推到最小距離之外；ref = 平倉參考價（買單用 Bid、賣單用 Ask）
+   void _fixStops(string sym, bool isBuy, double ref, double &sl, double &tp)
+   {
+      double d = _minStopDist(sym) + SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(sl > 0)
+      {
+         if(isBuy  && ref-sl < d) sl = ref - d;
+         if(!isBuy && sl-ref < d) sl = ref + d;
+         sl = _normPrice(sym, sl);
+      }
+      if(tp > 0)
+      {
+         if(isBuy  && tp-ref < d) tp = ref + d;
+         if(!isBuy && ref-tp < d) tp = ref - d;
+         tp = _normPrice(sym, tp);
+      }
+   }
+
+   bool _resultOK(string sym, string what)
+   {
+      uint rc = trade.ResultRetcode();
+      if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL)
+         return true;
+      PrintFormat("❌ [%s] %s 失敗 retcode=%u %s", sym, what, rc, trade.ResultRetcodeDescription());
+      return false;
+   }
+
+   bool _retryable()
+   {
+      uint rc = trade.ResultRetcode();
+      return (rc == TRADE_RETCODE_REQUOTE || rc == TRADE_RETCODE_PRICE_CHANGED ||
+              rc == TRADE_RETCODE_PRICE_OFF || rc == TRADE_RETCODE_TIMEOUT);
+   }
+
+   bool _closeTicket(ulong ticket, string sym)
+   {
+      trade.SetTypeFillingBySymbol(sym);
+      trade.PositionClose(ticket);
+      return _resultOK(sym, "平倉");
+   }
+
    int FindRule(string sym)
    {
       string core = GetCoreSymbol(sym);
@@ -208,8 +361,10 @@ private:
    //-----------------------------------------------------------------
    bool _checkNewBarF(int idx)
    {
+      if(m_symName[idx] == "") return false;
+
       datetime barTime[1];
-      if(CopyTime(SYMBOLS[idx], m_tf, 0, 1, barTime) != 1) return false;
+      if(CopyTime(m_symName[idx], m_tf, 0, 1, barTime) != 1) return false;
 
       if(barTime[0] != m_lastBarTimeF[idx])
       {
@@ -229,7 +384,8 @@ private:
 
    ENUM_SIG _calcSignalShift(int idx, int shift)
    {
-      string sym = SYMBOLS[idx];
+      string sym = m_symName[idx];
+      if(sym == "") return SIG_NONE;
       double emaFast, emaSlow, rsi, bbUpper, bbLower, bbMid;
       double macdMain, macdSigVal, stochK, stochD;
 
@@ -360,7 +516,7 @@ private:
          ulong ticket = pos.Ticket();
          string sym   = pos.Symbol();
 
-         if(trade.PositionClose(ticket))
+         if(_closeTicket(ticket, sym))
             Print("✅ 全平 ", sym, " | ", reason);
       }
    }
@@ -372,7 +528,7 @@ private:
          if(!pos.SelectByIndex(i) || pos.Magic() != magic || pos.Symbol() != sym) continue;
 
          ulong ticket = pos.Ticket();
-         if(trade.PositionClose(ticket))
+         if(_closeTicket(ticket, sym))
             Print("✅ 平倉 ", sym, " | ", reason);
       }
    }
@@ -488,6 +644,7 @@ public:
          m_hMACD[i]        = INVALID_HANDLE;
          m_hStoch[i]       = INVALID_HANDLE;
          m_lastBarTimeF[i] = 0;
+         m_symName[i]      = "";
       }
    }
 
@@ -500,23 +657,27 @@ public:
 
       for(int i=0; i<SYMBOL_COUNT; i++)
       {
-         string sym = SYMBOLS[i];
-
-         // 券商 Market Watch 裡沒勾選的商品先嘗試自動加入，
-         // 加不進去（真的沒這商品）SymbolSelect 會回傳 false，後面 iXxx 也會建 handle 失敗。
-         SymbolSelect(sym, true);
+         // 對應券商實際名稱（含後綴/前綴），並自動加入 Market Watch；
+         // 券商沒有這個商品就整個跳過，不影響其餘商品。
+         string sym = _resolveName(SYMBOLS[i]);
+         m_symName[i] = sym;
+         if(sym == "")
+         {
+            failCount++;
+            continue;
+         }
 
          m_hEmaFast[i] = iMA(sym, m_tf, EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
          m_hEmaSlow[i] = iMA(sym, m_tf, EMA_SLOW, 0, MODE_EMA, PRICE_CLOSE);
          m_hRSI[i]     = iRSI(sym, m_tf, RSI_PERIOD, PRICE_CLOSE);
 
-         if(sym == "USDJPY")
+         if(SYMBOLS[i] == "USDJPY")
             m_hBB[i] = iBands(sym, m_tf, BB_PERIOD_USDJPY, 0, BB_DEV_USDJPY, PRICE_CLOSE);
          else
             m_hBB[i] = iBands(sym, m_tf, BB_PERIOD_DEFAULT, 0, BB_DEV_DEFAULT, PRICE_CLOSE);
 
          m_hMACD[i]  = iMACD(sym, m_tf, MACD_FAST, MACD_SLOW, MACD_SIG, PRICE_CLOSE);
-         m_hStoch[i] = iStochastic(sym, m_tf, KdjPeriod(sym), KDJ_KD, KDJ_KK, MODE_SMA, STO_LOWHIGH);
+         m_hStoch[i] = iStochastic(sym, m_tf, KdjPeriod(SYMBOLS[i]), KDJ_KD, KDJ_KK, MODE_SMA, STO_LOWHIGH);
 
          if(m_hEmaFast[i] == INVALID_HANDLE || m_hEmaSlow[i] == INVALID_HANDLE ||
             m_hRSI[i]     == INVALID_HANDLE || m_hBB[i]      == INVALID_HANDLE ||
@@ -533,6 +694,7 @@ public:
             if(m_hMACD[i]    != INVALID_HANDLE) { IndicatorRelease(m_hMACD[i]);    m_hMACD[i]    = INVALID_HANDLE; }
             if(m_hStoch[i]   != INVALID_HANDLE) { IndicatorRelease(m_hStoch[i]);   m_hStoch[i]   = INVALID_HANDLE; }
 
+            m_symName[i] = "";
             failCount++;
             continue;
          }
@@ -558,6 +720,11 @@ public:
          if(m_hStoch[i]   != INVALID_HANDLE) { IndicatorRelease(m_hStoch[i]);   m_hStoch[i]   = INVALID_HANDLE; }
       }
 
+      for(int i=0; i<ArraySize(m_atrH); i++)
+         if(m_atrH[i] != INVALID_HANDLE) IndicatorRelease(m_atrH[i]);
+      ArrayResize(m_atrSym, 0);
+      ArrayResize(m_atrH,   0);
+
       Print("FilterLib v5: 所有指標handle已釋放");
    }
 
@@ -570,21 +737,71 @@ public:
       return (idx < 0) ? 0.01 : fx_rules[idx].lot_size;
    }
 
+   //-----------------------------------------------------------------
+   // 市價下單（參考 BeeQuant12 BQ_Trade.mqh）：
+   //  * 依商品設定成交模式 (filling)，避免部分券商直接拒單
+   //  * 手數對齊 volume_step / min / max
+   //  * SL/TP 太近時推到券商最小距離
+   //  * 檢查 retcode（不是只看 bool），遇到重新報價/價格變動自動重試 3 次
+   //-----------------------------------------------------------------
+   double NormalizeLots(string sym, double lots)
+   {
+      double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      double mn   = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      double mx   = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+      if(step <= 0) step = 0.01;
+      lots = MathFloor(lots/step + 1e-7) * step;
+      if(lots < mn) lots = mn;
+      if(mx > 0 && lots > mx) lots = mx;
+      return NormalizeDouble(lots, _volDigits(sym));
+   }
+
+   bool OpenMarket(string sym, int direction, double lots, double sl, double tp, string cmt)
+   {
+      bool isBuy = (direction > 0);
+      lots = NormalizeLots(sym, lots);
+
+      double price = isBuy ? SymbolInfoDouble(sym, SYMBOL_ASK) : SymbolInfoDouble(sym, SYMBOL_BID);
+      double margin = 0.0;
+      if(OrderCalcMargin(isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, sym, lots, price, margin) &&
+         margin > AccountInfoDouble(ACCOUNT_MARGIN_FREE))
+      {
+         PrintFormat("❌ [%s] 保證金不足：需要 %.2f 可用 %.2f", sym, margin, AccountInfoDouble(ACCOUNT_MARGIN_FREE));
+         return false;
+      }
+
+      trade.SetTypeFillingBySymbol(sym);
+
+      for(int attempt=0; attempt<3; attempt++)
+      {
+         double s = sl, t = tp;
+         if(isBuy)
+         {
+            _fixStops(sym, true, SymbolInfoDouble(sym, SYMBOL_BID), s, t);
+            trade.Buy(lots, sym, 0.0, s, t, cmt);
+         }
+         else
+         {
+            _fixStops(sym, false, SymbolInfoDouble(sym, SYMBOL_ASK), s, t);
+            trade.Sell(lots, sym, 0.0, s, t, cmt);
+         }
+
+         if(_resultOK(sym, isBuy ? "Buy" : "Sell")) return true;
+         if(!_retryable()) break;
+         Sleep(200);
+      }
+      return false;
+   }
+
    bool IsVolatilityNormal(string sym)
    {
       int idx = FindRule(sym);
       if(idx < 0) return true;
 
-      int h = iATR(sym, PERIOD_M1, 1);
-      if(h == INVALID_HANDLE) return true;
+      // 取不到值（handle 剛建立/歷史未同步）時沿用原本行為：不擋單
+      double atrPips = 0.0;
+      if(!_atrPips(sym, atrPips)) return true;
 
-      double buf[];
-      ArraySetAsSeries(buf, true);
-      bool ok = (CopyBuffer(h, 0, 0, 1, buf) > 0);
-      IndicatorRelease(h);
-      if(!ok) return true;
-
-      double atrPips = buf[0] / PipSize(sym);
       double limit   = fx_rules[idx].atr_threshold * VolatilityMultiplier;
       bool normal    = (atrPips < limit);
 
@@ -785,7 +1002,7 @@ public:
          double curTP  = pos.TakeProfit();
          double point  = SymbolInfoDouble(sym, SYMBOL_POINT);
          int    digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
-         int    sidx   = SymIdx(sym);
+         int    sidx   = _idxOf(sym);
 
          if(IsSymbolLocked(sym)) continue;
 
@@ -806,8 +1023,17 @@ public:
          double newSL = CalcTrailingStop(sym, dir, entry, curSL);
          if(MathAbs(newSL - curSL) > point * 2)
          {
-            trade.PositionModify(ticket, NormalizeDouble(newSL, digits), curTP);
-            Print("📐 SL ", sym, " ", DoubleToString(curSL,5), " -> ", DoubleToString(newSL,5), " [追蹤]");
+            // 新SL離現價太近會被券商拒絕（STOPS_LEVEL/FREEZE_LEVEL），這種情況本次先不改
+            double minD = _minStopDist(sym) + point;
+            bool tooClose = (dir == 1) ? (SymbolInfoDouble(sym, SYMBOL_BID) - newSL < minD)
+                                       : (newSL - SymbolInfoDouble(sym, SYMBOL_ASK) < minD);
+            if(!tooClose)
+            {
+               newSL = _normPrice(sym, newSL);
+               trade.PositionModify(ticket, newSL, curTP);
+               if(_resultOK(sym, "改SL"))
+                  Print("📐 SL ", sym, " ", DoubleToString(curSL,digits), " -> ", DoubleToString(newSL,digits), " [追蹤]");
+            }
          }
 
          if(sidx >= 0 && _checkNewBarF(sidx))
@@ -816,7 +1042,7 @@ public:
             if((dir == 1 && sig == SIG_SELL) || (dir == -1 && sig == SIG_BUY))
             {
                Print("🔄 [F] 反向信號 ", sym, " ticket=", ticket, " → 主動平倉");
-               trade.PositionClose(ticket);
+               _closeTicket(ticket, sym);
             }
          }
       }
@@ -872,15 +1098,7 @@ public:
 
       if(idx >= 0)
       {
-         int h = iATR(sym, PERIOD_M1, 1);
-         if(h != INVALID_HANDLE)
-         {
-            double buf[];
-            ArraySetAsSeries(buf, true);
-            if(CopyBuffer(h, 0, 0, 1, buf) > 0)
-               atrPips = buf[0] / PipSize(sym);
-            IndicatorRelease(h);
-         }
+         _atrPips(sym, atrPips);
 
          atrLimit = fx_rules[idx].atr_threshold * VolatilityMultiplier;
       }
