@@ -6,7 +6,7 @@
     1. 圖表上正在使用的 EA / 指標（讀取 MQL5\Profiles 內所有 .chr 圖表與 .tpl 模板）
     2. 保留清單檔（MT5_保留清單.txt）列出的名稱，可用 * 萬用字元
     3. 以上檔案用到的相依檔：同名 .mq5/.ex5、#include 的 .mqh、iCustom 呼叫的指標
-    4. MT5 內建範例資料夾（Examples、Free Robots）一律保留
+    4. MT5 內建 / 券商附帶資料夾（Examples、Free Robots、Advisors、Market、MyTrader app suite）一律保留
 
   只處理：Experts、Indicators、Scripts、Services，以及 MQL5 底下其他非標準資料夾與散落檔案。
   不處理：Include、Libraries、Files、Images、Logs、Presets、Profiles、Sounds、Shared Projects。
@@ -21,7 +21,7 @@ param(
     [string]$Root = (Join-Path $env:APPDATA 'MetaQuotes\Terminal'),
     [string]$KeepList = (Join-Path $PSScriptRoot 'MT5_保留清單.txt'),
     [string]$ArchiveDir = '',
-    [string[]]$ProtectFolders = @('Examples', 'Free Robots'),
+    [string[]]$ProtectFolders = @('Examples', 'Free Robots', 'Advisors', 'Market', 'MyTrader app suite'),
     [switch]$Apply
 )
 
