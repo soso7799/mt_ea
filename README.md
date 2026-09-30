@@ -70,3 +70,9 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 2. `python ml/regime_stats.py` 看統計，決定是否開啟行情過濾、斐波止損止盈。
 3. 基準回測（型態、ML、行情過濾都關）→ 逐項開啟比較 → 樣本外驗證。
 4. FTMO 免費試用帳戶確認排程、新聞、週五平倉後，再 `Inp_TradeEnabled=true`。
+
+## EA_Report.mq5（帳戶內各 EA 成績統計，只讀）
+
+放到 `MQL5\Scripts\`，編譯後拖到**要檢查的帳戶**任一圖表執行（不會交易，可在真實帳戶跑）：
+依 Magic Number 統計每個 EA 的淨利、勝率、獲利因子、最大回撤、最近 30/90 天損益，
+列出目前各圖表掛的 EA，並輸出 `Common\Files\EA_Report\EA_Report_<帳號>.csv`。
