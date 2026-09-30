@@ -1,0 +1,7 @@
+﻿# MT5 保留清單：一行一個名稱，# 開頭是註解
+# 圖表上正在使用的 EA / 指標會自動保留，這裡只需要列「沒掛在圖表、但還要留著」的程式。
+# 可以寫檔名（不含副檔名）、相對路徑，或用 * 萬用字元。例如：
+#   MultiCurrency_EA
+#   Gold_Martingale_*_V179
+#   Scripts\DeployIndicatorStack
+#   Experts\MultiCurrency\*
