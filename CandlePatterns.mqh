@@ -198,14 +198,14 @@ private:
                if(s + 1 + TrendBars >= m_n) break;
                if(!LongBull(e) || !DownBefore(s)) continue;
                bool ok = true;
-               double mh = -DBL_MAX, ml = DBL_MAX;
+               double maxHi = -DBL_MAX, minLo = DBL_MAX;
                for(int k=e+1; k<=s; k++)
                {
                   if(!Small(k)) { ok = false; break; }
-                  mh = MathMax(mh, Hi(k));
-                  ml = MathMin(ml, Lo(k));
+                  maxHi = MathMax(maxHi, Hi(k));
+                  minLo = MathMin(minLo, Lo(k));
                }
-               if(ok && Hi(e) >= mh && Lo(e) <= ml)
+               if(ok && Hi(e) >= maxHi && Lo(e) <= minLo)
                   return s;
             }
             return -1;
@@ -311,14 +311,14 @@ private:
                if(s + 1 + TrendBars >= m_n) break;
                if(!LongBear(e) || !UpBefore(s)) continue;
                bool ok = true;
-               double mh = -DBL_MAX, ml = DBL_MAX;
+               double maxHi = -DBL_MAX, minLo = DBL_MAX;
                for(int k=e+1; k<=s; k++)
                {
                   if(!Bull(k) || !Small(k)) { ok = false; break; }
-                  mh = MathMax(mh, Hi(k));
-                  ml = MathMin(ml, Lo(k));
+                  maxHi = MathMax(maxHi, Hi(k));
+                  minLo = MathMin(minLo, Lo(k));
                }
-               if(ok && Hi(e) >= mh && Lo(e) <= ml)
+               if(ok && Hi(e) >= maxHi && Lo(e) <= minLo)
                   return s;
             }
             return -1;
