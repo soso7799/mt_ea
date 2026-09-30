@@ -71,7 +71,7 @@ input double Inp_DailyLossPct = 3.5;   // 每日虧損上限 %（FTMO 規定 5%�
 input double Inp_MaxLossPct   = 4.0;   // 總虧損上限 %（FTMO 規定 10%，淨值低於 初始×(1-%) 全平鎖日）
 
 input group "=== Account Protection ==="
-input bool Inp_AllowReal   = true; // 允許在真實帳戶執行（false = 只在模擬帳戶執行）
+input bool Inp_AllowReal   = false; // 允許在真實帳戶執行（false = 只在模擬帳戶執行；FTMO 帳戶屬模擬類型不受影響）
 input long Inp_LockAccount = 0;    // 只允許此帳號執行（0 = 不限）
 
 input group "=== K線型態濾網（翻多16招/翻空18招）==="
