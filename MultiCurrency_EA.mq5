@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//  MultiCurrency_EA.mq5  v5.3
+//  MultiCurrency_EA.mq5  v5.9（各版修改記錄見下方 v5.3 ~ v5.9 說明；版號以 #property version 為準）
 //  8幣別平等競爭，ATR動能排序
 //  5個指標全部同向 → 訂單上限由FilterLib控制
 //  風控全部由 FilterLib_v5.mqh 處理
