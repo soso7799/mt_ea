@@ -95,6 +95,7 @@ foreach ($t in $terminals) {
                 $parts = @($m.Groups['ver'].Value -split '[._]' | ForEach-Object { [int]$_ })
                 while ($parts.Count -lt 2) { $parts += 0 }
                 [pscustomobject]@{ File = $f; Key = ($m.Groups['base'].Value.ToLower() + '|' + $f.Extension.ToLower())
+                                   Segs = ($m.Groups['ver'].Value -split '[._]').Count
                                    Ver = [version]($parts[0..([math]::Min(3, $parts.Count - 1))] -join '.') }
             }
         }
@@ -104,6 +105,10 @@ foreach ($t in $terminals) {
             foreach ($old in ($sorted | Select-Object -Skip 1)) {
                 if ($old.File.Extension -ieq '.mqh') {
                     Add-Item '舊版本' '手動確認' $old.File.FullName $newest.FullName '.mqh 會被 EA 以檔名 #include，刪除可能導致重新編譯失敗'
+                } elseif ($old.File.Extension -notin '.mq5', '.ex5') {
+                    Add-Item '舊版本' '手動確認' $old.File.FullName $newest.FullName '設定檔 / 其他檔案：版本號格式不一定可比較（例如 v53 可能是 5.3）'
+                } elseif ($old.Segs -ne $sorted[0].Segs) {
+                    Add-Item '舊版本' '手動確認' $old.File.FullName $newest.FullName '版本號格式不同（例如 v2.40 與 v2.40_479），可能是不同分支而非舊版'
                 } else {
                     Add-Item '舊版本' '移除' $old.File.FullName $newest.FullName "較新版本：$($newest.Name)"
                 }
