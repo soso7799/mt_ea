@@ -16,13 +16,17 @@
     powershell -ExecutionPolicy Bypass -File "路徑\Keep-MT5Needed.ps1" -Apply     # 實際搬移
     -KeepList  "D:\我的保留清單.txt"   指定保留清單（預設：與腳本同資料夾的 MT5_保留清單.txt）
     -ArchiveDir "D:\MT5_封存"         指定封存位置（預設：桌面\MT5_封存_日期時間）
+    -Delete                           不封存，直接刪除（送到資源回收筒，清空回收筒前仍可救回）
+    -Delete -Permanent                永久刪除，無法復原
 #>
 param(
     [string]$Root = (Join-Path $env:APPDATA 'MetaQuotes\Terminal'),
     [string]$KeepList = (Join-Path $PSScriptRoot 'MT5_保留清單.txt'),
     [string]$ArchiveDir = '',
     [string[]]$ProtectFolders = @('Examples', 'Free Robots', 'Advisors', 'Market', 'MyTrader app suite'),
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$Delete,      # 直接刪除（送到資源回收筒），不封存
+    [switch]$Permanent    # 與 -Delete 一起用：永久刪除，不經過資源回收筒
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +42,7 @@ $programExt  = @('.mq5', '.ex5', '.mqh', '.mq4', '.ex4', '.set')
 
 if (-not (Test-Path -LiteralPath $Root)) { Write-Host "找不到資料夾：$Root" -ForegroundColor Red; exit 1 }
 
+if ($Delete) { $Apply = $true }
 if ($Apply) {
     $running = Get-Process -Name terminal64, terminal, metaeditor64, metaeditor, metatester64 -ErrorAction SilentlyContinue
     if ($running) {
@@ -194,6 +199,38 @@ if (-not $Apply) {
     Write-Host "目前只產生報告，沒有搬動任何檔案。共 $($toMove.Count) 個檔案會被封存。" -ForegroundColor Yellow
     Write-Host '請檢查報告中「封存」的項目；要保留的，把名稱加進 MT5_保留清單.txt 後重新執行。'
     Write-Host '確認後關閉 MT5，加 -Apply 執行。'
+    exit 0
+}
+
+# ---------- 直接刪除 ----------
+if ($Delete) {
+    if (-not $Permanent) { Add-Type -AssemblyName Microsoft.VisualBasic }
+    $deleted = 0
+    $dirs = @{}
+    foreach ($m in $toMove) {
+        if (-not (Test-Path -LiteralPath $m.Source)) { continue }
+        if ($Permanent) {
+            Remove-Item -LiteralPath $m.Source -Force
+        } else {
+            [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($m.Source, 'OnlyErrorDialogs', 'SendToRecycleBin')
+        }
+        $dirs[(Split-Path $m.Source -Parent)] = $true
+        $deleted++
+    }
+    # 移除刪完後變空的子資料夾（Experts / Indicators / Scripts / Services 本身與 MQL5 保留）
+    foreach ($d in ($dirs.Keys | Sort-Object Length -Descending)) {
+        $cur = $d
+        while ($cur -and (Test-Path -LiteralPath $cur) -and
+               ((Split-Path $cur -Leaf) -ne 'MQL5') -and
+               -not ($programDirs -contains (Split-Path $cur -Leaf) -and (Split-Path (Split-Path $cur -Parent) -Leaf) -eq 'MQL5') -and
+               -not (Get-ChildItem -LiteralPath $cur -Force | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $cur -Force
+            $cur = Split-Path $cur -Parent
+        }
+    }
+    $how = if ($Permanent) { '永久刪除' } else { '刪除（已送到資源回收筒）' }
+    Write-Host "`n已$how $deleted 個檔案。報告：$reportPath" -ForegroundColor Green
+    Write-Host '開啟 MT5 確認 EA / 指標都正常。'
     exit 0
 }
 
