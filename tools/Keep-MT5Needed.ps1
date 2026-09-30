@@ -26,7 +26,8 @@ param(
     [string[]]$ProtectFolders = @('Examples', 'Free Robots', 'Advisors', 'Market', 'MyTrader app suite'),
     [switch]$Apply,
     [switch]$Delete,      # 直接刪除（送到資源回收筒），不封存
-    [switch]$Permanent    # 與 -Delete 一起用：永久刪除，不經過資源回收筒
+    [switch]$Permanent,   # 與 -Delete 一起用：永久刪除，不經過資源回收筒
+    [switch]$Interactive  # 批次檔用：等使用者關閉 MT5、刪除前先確認
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,7 +49,12 @@ if ($Apply) {
     if ($running) {
         Write-Host '請先關閉所有 MT5 / MetaEditor 視窗再執行 -Apply：' -ForegroundColor Red
         $running | ForEach-Object { Write-Host "  $($_.ProcessName)  PID=$($_.Id)" }
-        exit 1
+        if (-not $Interactive) { exit 1 }
+        while ($running) {
+            Read-Host '關閉後按 Enter 繼續'
+            $running = Get-Process -Name terminal64, terminal, metaeditor64, metaeditor, metatester64 -ErrorAction SilentlyContinue
+            if ($running) { Write-Host '還有 MT5 / MetaEditor 開著，請全部關閉。' -ForegroundColor Red }
+        }
     }
 }
 
@@ -200,6 +206,13 @@ if (-not $Apply) {
     Write-Host '請檢查報告中「封存」的項目；要保留的，把名稱加進 MT5_保留清單.txt 後重新執行。'
     Write-Host '確認後關閉 MT5，加 -Apply 執行。'
     exit 0
+}
+
+if ($Interactive) {
+    $what = if ($Delete -and $Permanent) { '永久刪除' } elseif ($Delete) { '刪除（送到資源回收筒）' } else { '封存' }
+    Write-Host ''
+    Write-Host "即將$what $($toMove.Count) 個檔案（清單見上面的報告）。" -ForegroundColor Yellow
+    Read-Host '按 Enter 開始；要取消請直接關閉這個視窗'
 }
 
 # ---------- 直接刪除 ----------
