@@ -10,7 +10,7 @@
 //|  本腳本不送出任何交易指令，可安全在真實帳戶執行                     |
 //+------------------------------------------------------------------+
 #property script_show_inputs
-#property version "1.01"
+#property version "1.02"
 
 #include <Generic\HashMap.mqh>
 
@@ -42,20 +42,35 @@ struct SEA
 };
 
 SEA               g_ea[];
-CHashMap<long,int> g_magicIdx;   // magic → g_ea 索引
-CHashMap<long,long> g_posMagic;  // position id → magic（SL/TP 觸發的平倉用開倉時的 magic）
+CHashMap<string,int> g_keyIdx;     // 分組鍵 → g_ea 索引
+CHashMap<long,long>  g_posMagic;   // position id → magic（SL/TP 觸發的平倉用開倉時的 magic）
+CHashMap<long,string> g_posCmt;    // position id → 開倉註解
 
-int EAIndex(const long magic)
+// 分組鍵：一般 EA 依 magic；magic=0（手動單或沒設 magic 的 EA）再依開倉註解細分，
+// 否則所有沒設 magic 的 EA 會混成一筆，看不出是誰在虧
+string GroupKey(const long magic, const string cmt)
 {
+   if(magic != 0) return IntegerToString(magic);
+   string c = cmt;
+   // 註解裡的 [sl 1.2345]/[tp …] 是券商自動加的，去掉
+   int p = StringFind(c, "[");
+   if(p >= 0) c = StringSubstr(c, 0, p);
+   StringTrimLeft(c); StringTrimRight(c);
+   return "0|" + c;
+}
+
+int EAIndex(const long magic, const string cmt)
+{
+   string key = GroupKey(magic, cmt);
    int idx;
-   if(g_magicIdx.TryGetValue(magic, idx)) return idx;
+   if(g_keyIdx.TryGetValue(key, idx)) return idx;
    idx = ArraySize(g_ea);
    ArrayResize(g_ea, idx + 1);
    ZeroMemory(g_ea[idx]);
    g_ea[idx].magic   = magic;
-   g_ea[idx].comment = "";
+   g_ea[idx].comment = (magic == 0) ? StringSubstr(key, 2) : "";
    g_ea[idx].symbols = ";";
-   g_magicIdx.Add(magic, idx);
+   g_keyIdx.Add(key, idx);
    return idx;
 }
 
@@ -102,17 +117,21 @@ void OnStart()
       double   pnl   = HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP)
                      + HistoryDealGetDouble(t, DEAL_COMMISSION) + HistoryDealGetDouble(t, DEAL_FEE);
 
+      string openCmt = cmt;
       if(entry == DEAL_ENTRY_IN)
       {
          g_posMagic.TrySetValue(posId, magic);
+         g_posCmt.TrySetValue(posId, cmt);
       }
       else
       {
          long m;
          if(g_posMagic.TryGetValue(posId, m)) magic = m;   // 用開倉時的 magic
+         string oc;
+         if(g_posCmt.TryGetValue(posId, oc)) openCmt = oc;
       }
 
-      int k = EAIndex(magic);
+      int k = EAIndex(magic, openCmt);
       AddSymbol(k, sym);
       if(g_ea[k].comment == "" && entry == DEAL_ENTRY_IN && cmt != "")
          g_ea[k].comment = cmt;
@@ -144,7 +163,7 @@ void OnStart()
    {
       ulong t = PositionGetTicket(i);
       if(t == 0) continue;
-      int k = EAIndex(PositionGetInteger(POSITION_MAGIC));
+      int k = EAIndex(PositionGetInteger(POSITION_MAGIC), PositionGetString(POSITION_COMMENT));
       AddSymbol(k, PositionGetString(POSITION_SYMBOL));
       g_ea[k].openPos++;
       g_ea[k].floating += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
@@ -184,7 +203,7 @@ void OnStart()
       string sy  = e.symbols;
       StringReplace(sy, ";", " ");
       StringTrimLeft(sy); StringTrimRight(sy);
-      string who = (e.magic == 0) ? "手動單" : ("Magic " + IntegerToString(e.magic));
+      string who = (e.magic == 0) ? "Magic 0(無magic)" : ("Magic " + IntegerToString(e.magic));
       string v   = Verdict(e);
 
       PrintFormat("%s %-18s %-20s 筆數%4d 勝率%5.1f%% 淨利%10.2f PF%5.2f 回撤%9.2f 連虧%2d 近30天%9.2f 近90天%9.2f 最後%s 持倉%d(%.2f) [%s]",
