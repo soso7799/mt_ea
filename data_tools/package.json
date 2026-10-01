@@ -1,0 +1,8 @@
+{
+  "name": "ftmo-market-data",
+  "private": true,
+  "type": "module",
+  "description": "FTMO 商品歷史資料下載與多週期轉換（Dukascopy）",
+  "scripts": { "update": "node update.mjs" },
+  "dependencies": { "dukascopy-node": "1.50.0" }
+}
