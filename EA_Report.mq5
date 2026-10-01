@@ -10,7 +10,7 @@
 //|  本腳本不送出任何交易指令，可安全在真實帳戶執行                     |
 //+------------------------------------------------------------------+
 #property script_show_inputs
-#property version "1.02"
+#property version "1.03"
 
 #include <Generic\HashMap.mqh>
 
@@ -45,10 +45,27 @@ SEA               g_ea[];
 CHashMap<string,int> g_keyIdx;     // 分組鍵 → g_ea 索引
 CHashMap<long,long>  g_posMagic;   // position id → magic（SL/TP 觸發的平倉用開倉時的 magic）
 CHashMap<long,string> g_posCmt;    // position id → 開倉註解
+CHashMap<long,long>   g_posReason; // position id → 開倉成交原因（誰下的單）
+
+// 成交原因 → 下單來源（magic=0 時用來分辨手動單/手機/網頁/EA或外部程式）
+string ReasonName(const long r)
+{
+   switch((int)r)
+   {
+      case DEAL_REASON_CLIENT: return "桌面手動";
+      case DEAL_REASON_MOBILE: return "手機";
+      case DEAL_REASON_WEB:    return "網頁";
+      case DEAL_REASON_EXPERT: return "EA/腳本/API";
+      case DEAL_REASON_SL:     return "止損";
+      case DEAL_REASON_TP:     return "止盈";
+      case DEAL_REASON_SO:     return "強平";
+   }
+   return "其他(" + IntegerToString(r) + ")";
+}
 
 // 分組鍵：一般 EA 依 magic；magic=0（手動單或沒設 magic 的 EA）再依開倉註解細分，
 // 否則所有沒設 magic 的 EA 會混成一筆，看不出是誰在虧
-string GroupKey(const long magic, const string cmt)
+string GroupKey(const long magic, const string cmt, const long reason)
 {
    if(magic != 0) return IntegerToString(magic);
    string c = cmt;
@@ -56,12 +73,12 @@ string GroupKey(const long magic, const string cmt)
    int p = StringFind(c, "[");
    if(p >= 0) c = StringSubstr(c, 0, p);
    StringTrimLeft(c); StringTrimRight(c);
-   return "0|" + c;
+   return "0|[" + ReasonName(reason) + "] " + (c == "" ? "(無註解)" : c);
 }
 
-int EAIndex(const long magic, const string cmt)
+int EAIndex(const long magic, const string cmt, const long reason)
 {
-   string key = GroupKey(magic, cmt);
+   string key = GroupKey(magic, cmt, reason);
    int idx;
    if(g_keyIdx.TryGetValue(key, idx)) return idx;
    idx = ArraySize(g_ea);
@@ -117,11 +134,13 @@ void OnStart()
       double   pnl   = HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP)
                      + HistoryDealGetDouble(t, DEAL_COMMISSION) + HistoryDealGetDouble(t, DEAL_FEE);
 
-      string openCmt = cmt;
+      string openCmt    = cmt;
+      long   openReason = HistoryDealGetInteger(t, DEAL_REASON);
       if(entry == DEAL_ENTRY_IN)
       {
          g_posMagic.TrySetValue(posId, magic);
          g_posCmt.TrySetValue(posId, cmt);
+         g_posReason.TrySetValue(posId, openReason);
       }
       else
       {
@@ -129,9 +148,11 @@ void OnStart()
          if(g_posMagic.TryGetValue(posId, m)) magic = m;   // 用開倉時的 magic
          string oc;
          if(g_posCmt.TryGetValue(posId, oc)) openCmt = oc;
+         long orr;
+         if(g_posReason.TryGetValue(posId, orr)) openReason = orr;
       }
 
-      int k = EAIndex(magic, openCmt);
+      int k = EAIndex(magic, openCmt, openReason);
       AddSymbol(k, sym);
       if(g_ea[k].comment == "" && entry == DEAL_ENTRY_IN && cmt != "")
          g_ea[k].comment = cmt;
@@ -163,7 +184,11 @@ void OnStart()
    {
       ulong t = PositionGetTicket(i);
       if(t == 0) continue;
-      int k = EAIndex(PositionGetInteger(POSITION_MAGIC), PositionGetString(POSITION_COMMENT));
+      long pr = PositionGetInteger(POSITION_REASON);
+      long rr = (pr == POSITION_REASON_CLIENT) ? DEAL_REASON_CLIENT :
+                (pr == POSITION_REASON_MOBILE) ? DEAL_REASON_MOBILE :
+                (pr == POSITION_REASON_WEB)    ? DEAL_REASON_WEB    : DEAL_REASON_EXPERT;
+      int k = EAIndex(PositionGetInteger(POSITION_MAGIC), PositionGetString(POSITION_COMMENT), rr);
       AddSymbol(k, PositionGetString(POSITION_SYMBOL));
       g_ea[k].openPos++;
       g_ea[k].floating += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
@@ -182,6 +207,7 @@ void OnStart()
 
    long   login = AccountInfoInteger(ACCOUNT_LOGIN);
    string mode  = (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL) ? "真實" : "模擬/競賽";
+   PrintFormat("===== EA_Report v1.03 =====");
    PrintFormat("===== EA 成績報告  帳號 %I64d（%s）%s  %s ~ %s =====",
                login, mode, AccountInfoString(ACCOUNT_SERVER),
                TimeToString(InpFrom, TIME_DATE), TimeToString(now, TIME_DATE));
