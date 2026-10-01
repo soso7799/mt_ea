@@ -100,3 +100,15 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 6. 空間：100 個商品約 5.6 GB（zip 約 1.4 GB）；每年增加約 1.9 GB。若加上 M1 約再多 6.3 GB。
 
 `tools/ftmo_sync.ps1`（Windows 工作排程器每天跑）：把資料同步到雲端硬碟，並把總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。
+
+## ml/backtest_trend.py — 用 FTMO 匯出資料回測 TrendScanner v2
+
+```bash
+python ml/backtest_trend.py                                   # 預設讀 Common\Files\FTMO_Data，近 3 年全部商品
+python ml/backtest_trend.py --data "H:\我的雲端硬碟\FTMO_Data" --split 2026-01-01
+python ml/backtest_trend.py --symbols EURUSD,XAUUSD --trail swing --units 1
+```
+
+- 只需 Python（不用安裝套件）；規則、指標算法與 TrendScanner.mq5 / MarketRegime.mqh 相同（MT5 版 MACD、ADX、RSI、ATR）。
+- 自動讀 `TrendScanner\params.csv` 的各商品參數，可用來比較參數。
+- 報告：全部、分組、年度、樣本內/外、出場原因、各商品（筆數、勝率、平均 R、總 R、PF、最大回撤 R、以 0.15% 換算的帳戶報酬），逐筆交易輸出 CSV。
