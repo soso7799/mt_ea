@@ -94,9 +94,9 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 
 1. MT5「工具 → 選項 → 圖表 → 圖表最大K棒數」設為 **Unlimited**，重啟 MT5。
 2. `HistoryExporter.mq5` 與 `SymbolGroups.mqh` 放同一資料夾，F7 編譯，掛到 **FTMO 模擬帳戶** 任一圖表（只讀不交易）。
-3. 週期：M1 M3 M5 M10 M12 M15 M30 H1 H4 D1 W1 MN1；M1~M30 抓 3 年、H1~MN1 抓 10 年（參數可改）。
+3. 週期：M3 M5 M10 M12 M15 M30 H1 H4 D1 W1 MN1（不含 M1 以節省空間，`InpTFs` 加上 M1 即可）；分鐘週期抓 3 年、H1~MN1 抓 10 年（參數可改）。
 4. 輸出 `Common\Files\FTMO_Data\<週期>\<商品>.csv`（FTMO 伺服器時間，MT5 匯入格式），總表 `SUMMARY.md / SUMMARY.csv`。
 5. 第一次要從伺服器下載歷史，約數十分鐘到數小時；之後每 10 天只附加新K棒。
-6. 空間：100 個商品約 12 GB（zip 約 3 GB），其中 M1 佔一半；每年增加約 4 GB。
+6. 空間：100 個商品約 5.6 GB（zip 約 1.4 GB）；每年增加約 1.9 GB。若加上 M1 約再多 6.3 GB。
 
 `tools/ftmo_sync.ps1`（Windows 工作排程器每天跑）：把資料同步到雲端硬碟，並把總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。

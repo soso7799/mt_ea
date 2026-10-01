@@ -20,8 +20,8 @@
 
 input string InpSymbols     = "";      // 指定商品（逗號分隔，空白 = 依分組自動抓券商全部商品）
 input string InpGroups      = "major,cross,exotic,metal,energy,index,agri,crypto"; // 分組
-input string InpTFs         = "M1,M3,M5,M10,M12,M15,M30,H1,H4,D1,W1,MN1";        // 週期
-input int    InpMinuteYears = 3;       // M1~M30 保留幾年
+input string InpTFs         = "M3,M5,M10,M12,M15,M30,H1,H4,D1,W1,MN1";           // 週期（不含 M1 省一半以上空間；要的話加 M1）
+input int    InpMinuteYears = 3;       // 分鐘週期（M1~M30）保留幾年
 input int    InpHourYears   = 10;      // H1~MN1 保留幾年（檔案很小，可多抓）
 input int    InpEveryDays   = 10;      // 幾天更新一次
 input string InpFolder      = "FTMO_Data";
@@ -337,7 +337,7 @@ void WriteSummary()
    FileWriteString(h, "# FTMO 歷史資料總表\n\n");
    FileWriteString(h, StringFormat("- 來源：%s（帳號 %I64d）\n- 最後更新：**%s**（伺服器時間），每 %d 天更新\n- M1~M30 保留 %d 年，H1~MN1 保留 %d 年；時間皆為 FTMO 伺服器時間\n\n",
                                    AccountInfoString(ACCOUNT_SERVER), acc, T(g_lastRun), InpEveryDays, InpMinuteYears, InpHourYears));
-   string head = "| 商品 | 分組 | 起 (M1) | 至 | ";
+   string head = "| 商品 | 分組 | 起 | 至 | ";
    string sep  = "|---|---|---|---|";
    for(int k = 0; k < ArraySize(g_tfName); k++) { head += g_tfName[k] + " | "; sep += "--:|"; }
    FileWriteString(h, head + "狀態 |\n" + sep + "---|\n");
@@ -384,10 +384,14 @@ int OnInit()
    FolderCreate(InpFolder, FILE_COMMON);
    LoadState();
 
+   // 最小週期需要的K棒數 vs「圖表最大K棒數」
+   int minSec = 86400;
+   for(int k = 0; k < ArraySize(g_tf); k++) minSec = MathMin(minSec, PeriodSeconds(g_tf[k]));
+   int needBars = (minSec < 3600) ? InpMinuteYears * 380000 * 60 / minSec : InpHourYears * 6500 * 3600 / minSec;
    int maxBars = TerminalInfoInteger(TERMINAL_MAXBARS);
-   if(maxBars < 2000000)
-      PrintFormat("⚠️ HistoryExporter：「圖表最大K棒數」= %d，M1 %d 年約需 %d 根。請到 工具→選項→圖表 設為 Unlimited 後重啟 MT5",
-                  maxBars, InpMinuteYears, InpMinuteYears * 380000);
+   if(maxBars < needBars)
+      PrintFormat("⚠️ HistoryExporter：「圖表最大K棒數」= %d，最小週期約需 %d 根。請到 工具→選項→圖表 設為 Unlimited 後重啟 MT5",
+                  maxBars, needBars);
 
    PrintFormat("HistoryExporter：週期 %s；上次執行 %s；每 %d 天更新", InpTFs, T(g_lastRun), InpEveryDays);
    EventSetTimer(2);
