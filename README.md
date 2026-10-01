@@ -99,7 +99,7 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 5. 第一次要從伺服器下載歷史，約數十分鐘到數小時；之後每 10 天只附加新K棒。
 6. 空間：100 個商品約 5.6 GB（zip 約 1.4 GB）；每年增加約 1.9 GB。若加上 M1 約再多 6.3 GB。
 
-`tools/ftmo_sync.ps1`（Windows 工作排程器每天跑）：把資料同步到雲端硬碟，並把總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。
+`tools/ftmo_sync.ps1`（Windows 工作排程器每天跑）：CSV 同步到 `H:\我的雲端硬碟\FTMO_Data`；資料更新時每個週期打包 zip 備份到 `G:\我的雲端硬碟\FTMO_Backup`（保留最近 3 份，每份約 1.4 GB）；總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。
 
 ## ml/backtest_trend.py — 用 FTMO 匯出資料回測 TrendScanner v2
 
