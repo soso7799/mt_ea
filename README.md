@@ -90,14 +90,13 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 - **安全**：`InpTradeEnabled=false`（只產生計畫）、`InpAllowReal=false`（真實帳戶不下單）、`InpLockAccount` 鎖帳號。
 - 輸出：`Common\Files\TrendScanner\plans_YYYYMMDD.csv`、圖表面板、手機推播。
 
-## 歷史資料自動更新（`data_tools/`，GitHub Actions 每 10 天）
+## HistoryExporter.mq5 — 從 FTMO 匯出歷史資料（只讀，每 10 天自動更新）
 
-- 商品清單：`data_tools/symbols.csv`（99 個 FTMO 商品：主要/交叉/異國貨幣、金屬、指數、能源、農產品、加密貨幣；加一列即可新增）。
-- 週期：M1 M2 M3 M4 M5 M6 M10 **M12** M15 M20 M30 H1 H2 H3 H4 H6 H8 H12 D1 W1 MN1。
-  - M1 從第一次執行往前 365 天開始累積（`config.json` 的 `m1_days`），H1 為上市以來全部；其他週期由這兩者合成。
-- 來源：Dukascopy 公開歷史資料（BID），時間轉成 FTMO 伺服器時間（冬令 UTC+2 / 夏令 UTC+3）。
-- 格式：`<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<TICKVOL>`，MT5 自訂商品「匯入K棒」可直接讀。
-- 資料檔：Releases → `market-data`，每個週期一個 zip。
-- 總表：[`data_tools/DATA_SUMMARY.md`](data_tools/DATA_SUMMARY.md)（每商品起訖時間、筆數、狀態、最後更新時間）、`data_tools/inventory.csv`（每商品每週期）。
-- 排程：`.github/workflows/update-market-data.yml`，每月 1、11、21 日。**排程只在預設分支（main）生效**；第一次補資料一次跑不完會自動續跑，也可在 Actions 頁手動 Run workflow。
-- 本機執行：`cd data_tools && npm install && node update.mjs --only EURUSD,XAUUSD`
+1. MT5「工具 → 選項 → 圖表 → 圖表最大K棒數」設為 **Unlimited**，重啟 MT5。
+2. `HistoryExporter.mq5` 與 `SymbolGroups.mqh` 放同一資料夾，F7 編譯，掛到 **FTMO 模擬帳戶** 任一圖表（只讀不交易）。
+3. 週期：M1 M3 M5 M10 M12 M15 M30 H1 H4 D1 W1 MN1；M1~M30 抓 3 年、H1~MN1 抓 10 年（參數可改）。
+4. 輸出 `Common\Files\FTMO_Data\<週期>\<商品>.csv`（FTMO 伺服器時間，MT5 匯入格式），總表 `SUMMARY.md / SUMMARY.csv`。
+5. 第一次要從伺服器下載歷史，約數十分鐘到數小時；之後每 10 天只附加新K棒。
+6. 空間：100 個商品約 12 GB（zip 約 3 GB），其中 M1 佔一半；每年增加約 4 GB。
+
+`tools/ftmo_sync.ps1`（Windows 工作排程器每天跑）：把資料同步到雲端硬碟，並把總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。

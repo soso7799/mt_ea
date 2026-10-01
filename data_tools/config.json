@@ -1,8 +1,0 @@
-{
-  "m1_days": 365,
-  "m1_chunk_days": 30,
-  "h1_chunk_days": 365,
-  "batch_size": 15,
-  "pause_ms": 300,
-  "budget_minutes": 300
-}
