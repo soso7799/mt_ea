@@ -96,10 +96,10 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 2. `HistoryExporter.mq5` 與 `SymbolGroups.mqh` 放同一資料夾，F7 編譯，掛到 **FTMO 模擬帳戶** 任一圖表（只讀不交易）。
 3. 週期：M3 M5 M10 M12 M15 M30 H1 H4 D1 W1 MN1（不含 M1 以節省空間，`InpTFs` 加上 M1 即可）；分鐘週期抓 3 年、H1~MN1 抓 10 年（參數可改）。
 4. 輸出 `Common\Files\FTMO_Data\<週期>\<商品>.csv`（FTMO 伺服器時間，MT5 匯入格式），總表 `SUMMARY.md / SUMMARY.csv`。
-5. 第一次要從伺服器下載歷史，約數十分鐘到數小時；之後每 10 天只附加新K棒。
+5. 第一次掛上立刻執行（下載歷史約 1~3 小時）；之後每 10 天於**台灣時間 01:00** 只附加新K棒（約 5~10 分鐘）。電腦當時沒開機，開機後會補跑。
 6. 空間：100 個商品約 5.6 GB（zip 約 1.4 GB）；每年增加約 1.9 GB。若加上 M1 約再多 6.3 GB。
 
-`tools/ftmo_sync.ps1`（Windows 工作排程器每天跑）：CSV 同步到 `H:\我的雲端硬碟\FTMO_Data`；資料更新時每個週期打包 zip 備份到 `G:\我的雲端硬碟\FTMO_Backup`（保留最近 3 份，每份約 1.4 GB）；總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。
+`tools/ftmo_sync.ps1`（Windows 工作排程器每天台灣時間 02:00 跑）：CSV 同步到 `H:\我的雲端硬碟\FTMO_Data`；資料更新時每個週期打包 zip 備份到 `G:\我的雲端硬碟\FTMO_Backup`（保留最近 3 份，每份約 1.4 GB）；總表推到 GitHub 的 `ftmo_data/SUMMARY.md`。
 
 ## ml/backtest_trend.py — 用 FTMO 匯出資料回測 TrendScanner v2
 

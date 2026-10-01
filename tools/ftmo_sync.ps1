@@ -2,7 +2,7 @@
 #   1) 同步到雲端硬碟 1（H:，CSV 原始資料，回測讀這裡）
 #   2) 資料有更新時，每個週期打包成 zip 備份到雲端硬碟 2（G:），保留最近 $Keep 份
 #   3) 總表推到 GitHub（ftmo_data/SUMMARY.md）
-# 用「工作排程器」每天執行一次即可（EA 每 10 天更新資料；沒變化就不會重複備份或提交）
+# 用「工作排程器」每天台灣時間 02:00 執行（EA 每 10 天 01:00 更新資料；沒變化就不會重複備份或提交）
 param(
   [string]$Data   = "$env:APPDATA\MetaQuotes\Terminal\Common\Files\FTMO_Data",  # EA 輸出位置
   [string]$Drive  = "H:\我的雲端硬碟\FTMO_Data",                                  # 雲端硬碟 1：CSV（留空 = 不同步）

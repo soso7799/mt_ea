@@ -4,7 +4,7 @@
 //|  ★ 只讀資料、不交易。建議掛在 FTMO 模擬帳戶的任一圖表               |
 //|  ★ 先到「工具 → 選項 → 圖表 → 圖表最大K棒數」設為 Unlimited（無限）   |
 //|                                                                  |
-//|  每 InpEveryDays 天（預設 10）自動執行一次：                         |
+//|  每 InpEveryDays 天（預設 10）在台灣時間 InpRunHourTW 點（預設 01:00）執行： |
 //|   1. 所有符合分組的商品 × 各週期，只附加新K棒（第一次會補足歷史）    |
 //|   2. 輸出 Common\Files\FTMO_Data\<週期>\<商品>.csv                   |
 //|      格式 <DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<TICKVOL>,<SPREAD> |
@@ -24,8 +24,9 @@ input string InpTFs         = "M3,M5,M10,M12,M15,M30,H1,H4,D1,W1,MN1";          
 input int    InpMinuteYears = 3;       // 分鐘週期（M1~M30）保留幾年
 input int    InpHourYears   = 10;      // H1~MN1 保留幾年（檔案很小，可多抓）
 input int    InpEveryDays   = 10;      // 幾天更新一次
+input int    InpRunHourTW   = 1;       // 在台灣時間幾點執行（0~23，與電腦時區無關）
 input string InpFolder      = "FTMO_Data";
-input bool   InpRunNow      = true;    // 掛上時若距上次超過間隔就立刻執行
+input bool   InpRunNow      = true;    // 第一次掛上（尚無資料）立刻執行，之後依排程
 input int    InpMaxRetry    = 40;      // 歷史資料尚未下載完成時，每個商品最多重試次數
 
 struct SJob   { string sym; int retry; };
@@ -304,8 +305,7 @@ void FinishRun()
    SaveState();
    WriteSummary();
    PrintFormat("HistoryExporter：完成 %d 個商品（%d 個資料不完整），耗時 %d 分。下次 %s",
-               g_done, g_partial, (int)((TimeCurrent() - g_runStart) / 60),
-               TimeToString(g_lastRun + InpEveryDays * 86400, TIME_DATE | TIME_MINUTES));
+               g_done, g_partial, (int)((TimeCurrent() - g_runStart) / 60), TW(NextRunTW()));
 }
 
 //+------------------------------------------------------------------+
@@ -393,27 +393,43 @@ int OnInit()
       PrintFormat("⚠️ HistoryExporter：「圖表最大K棒數」= %d，最小週期約需 %d 根。請到 工具→選項→圖表 設為 Unlimited 後重啟 MT5",
                   maxBars, needBars);
 
-   PrintFormat("HistoryExporter：週期 %s；上次執行 %s；每 %d 天更新", InpTFs, T(g_lastRun), InpEveryDays);
+   PrintFormat("HistoryExporter：週期 %s；上次執行 %s；每 %d 天於台灣 %02d:00 更新", InpTFs, T(g_lastRun), InpEveryDays, InpRunHourTW);
    EventSetTimer(2);
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason) { EventKillTimer(); SaveState(); Comment(""); }
 
+// 台灣時間（UTC+8，不受電腦時區、夏令影響）
+datetime TaiwanNow() { return TimeGMT() + 8 * 3600; }
+datetime ServerToTaiwan(const datetime srv)
+{
+   long off = (long)MathRound((double)(TimeTradeServer() - TimeGMT()) / 3600.0) * 3600;   // 伺服器 - UTC
+   return (datetime)(srv - off + 8 * 3600);
+}
+// 下次執行時間（台灣時間）：上次執行日 + InpEveryDays 天的 InpRunHourTW:00
+datetime NextRunTW()
+{
+   if(g_lastRun == 0) return TaiwanNow();
+   datetime tw = ServerToTaiwan(g_lastRun) + InpEveryDays * 86400;
+   return tw - tw % 86400 + InpRunHourTW * 3600;
+}
+string TW(const datetime t) { return TimeToString(t, TIME_DATE | TIME_MINUTES) + "（台灣）"; }
+
 void OnTimer()
 {
    if(!g_running)
    {
-      bool due = (g_lastRun == 0) || (TimeCurrent() - g_lastRun >= InpEveryDays * 86400);
-      if(due && (InpRunNow || g_lastRun > 0)) StartRun();
-      Comment(StringFormat("📦 HistoryExporter  上次 %s  下次 %s", T(g_lastRun),
-                           g_lastRun > 0 ? T(g_lastRun + InpEveryDays * 86400) : "掛上後立即"));
+      bool due = (g_lastRun == 0) ? InpRunNow : (TaiwanNow() >= NextRunTW());
+      if(due) StartRun();
+      Comment(StringFormat("📦 HistoryExporter  上次 %s  下次 %s", g_lastRun > 0 ? TW(ServerToTaiwan(g_lastRun)) : "尚未執行",
+                           g_lastRun > 0 ? TW(NextRunTW()) : (InpRunNow ? "立即" : "請把 InpRunNow 設為 true")));
       return;
    }
    ProcessOne();
    int total = ArraySize(g_queue);
-   Comment(StringFormat("📦 HistoryExporter 匯出中 %d / %d（完成 %d 個商品）\n%s",
-                        MathMin(g_pos, total), total, g_done,
+   Comment(StringFormat("📦 HistoryExporter 匯出中 %d / %d（完成 %d 個商品，已 %d 分鐘）\n%s",
+                        MathMin(g_pos, total), total, g_done, (int)((TimeCurrent() - g_runStart) / 60),
                         g_pos < total ? "下一個：" + g_queue[g_pos].sym : ""));
 }
 //+------------------------------------------------------------------+
