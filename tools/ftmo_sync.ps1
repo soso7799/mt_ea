@@ -1,14 +1,17 @@
 ﻿# ftmo_sync.ps1 — HistoryExporter 匯出的 FTMO 歷史資料：
 #   1) 同步到雲端硬碟 1（H:，CSV 原始資料，回測讀這裡）
 #   2) 資料有更新時，每個週期打包成 zip 備份到雲端硬碟 2（G:），保留最近 $Keep 份
-#   3) 總表推到 GitHub（ftmo_data/SUMMARY.md）
+#   3) 轉成 Gordon_FTMO_Data_Console 的 merged 格式並執行 update_all_data.py（儀表板直接可用）
+#   4) 總表推到 GitHub（ftmo_data/SUMMARY.md）
 # 用「工作排程器」每天台灣時間 02:00 執行（EA 每 10 天 01:00 更新資料；沒變化就不會重複備份或提交）
 param(
   [string]$Data   = "$env:APPDATA\MetaQuotes\Terminal\Common\Files\FTMO_Data",  # EA 輸出位置
   [string]$Drive  = "H:\我的雲端硬碟\FTMO_Data",                                  # 雲端硬碟 1：CSV（留空 = 不同步）
   [string]$Backup = "G:\我的雲端硬碟\FTMO_Backup",                                # 雲端硬碟 2：zip 備份（留空 = 不備份）
   [int]   $Keep   = 3,                                                           # 保留幾份備份
-  [string]$Repo   = "C:\mt_ea"                                                   # 本機 git clone 的 mt_ea（不存在 = 略過 GitHub）
+  [string]$Repo   = "C:\mt_ea",                                                  # 本機 git clone 的 mt_ea（不存在 = 略過 GitHub）
+  [string]$Gordon = "D:\整合計畫\整理後\ExportCSV\merged",                         # Gordon 儀表板 merged 資料夾（留空 = 不轉）
+  [string]$UpdateScript = "D:\整合計畫\update_all_data.py"                          # 轉完後執行（不存在 = 略過）
 )
 $ErrorActionPreference = "Stop"
 $log = Join-Path $env:TEMP "ftmo_sync.log"
@@ -53,7 +56,18 @@ if ($Backup -ne "") {
   }
 }
 
-# 3) 總表推到 GitHub
+# 3) Gordon 儀表板：轉 merged 格式 + update_all_data.py
+if ($Gordon -ne "") {
+  $py = "$env:LOCALAPPDATA\hermes\hermes-agent\venv\Scripts\python.exe"
+  if (-not (Test-Path $py)) { $py = (Get-Command python -ErrorAction SilentlyContinue).Source }
+  $conv = Join-Path $PSScriptRoot "ftmo_to_gordon.py"
+  if ($py -and (Test-Path $conv)) {
+    & $py $conv --data $Data --out $Gordon | Select-Object -Last 1 | ForEach-Object { Log "Gordon：$_" }
+    if (Test-Path $UpdateScript) { & $py $UpdateScript | Out-Null; Log "已執行 update_all_data.py" }
+  } else { Log "找不到 Python 或 ftmo_to_gordon.py，略過 Gordon 轉換" }
+}
+
+# 4) 總表推到 GitHub
 if (Test-Path (Join-Path $Repo ".git")) {
   $dst = Join-Path $Repo "ftmo_data"
   New-Item -ItemType Directory -Force -Path $dst | Out-Null

@@ -112,3 +112,8 @@ python ml/backtest_trend.py --symbols EURUSD,XAUUSD --trail swing --units 1
 - 只需 Python（不用安裝套件）；規則、指標算法與 TrendScanner.mq5 / MarketRegime.mqh 相同（MT5 版 MACD、ADX、RSI、ATR）。
 - 自動讀 `TrendScanner\params.csv` 的各商品參數，可用來比較參數。
 - 報告：全部、分組、年度、樣本內/外、出場原因、各商品（筆數、勝率、平均 R、總 R、PF、最大回撤 R、以 0.15% 換算的帳戶報酬），逐筆交易輸出 CSV。
+
+## tools/ftmo_to_gordon.py — 接上 Gordon_FTMO_Data_Console 儀表板
+
+把 HistoryExporter 的資料轉成 Gordon 的 `merged\<商品>_<週期>_MERGED_ALL_DATA.csv`（日期,開,高,低,收,成交量）
+與 `_last_bar_state.csv`，`update_all_data.py` 與儀表板不用改。只附加新K棒；`ftmo_sync.ps1` 每天自動執行，並接著跑 `update_all_data.py`。
