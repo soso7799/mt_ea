@@ -10,7 +10,7 @@
 //|  本腳本不送出任何交易指令，可安全在真實帳戶執行                     |
 //+------------------------------------------------------------------+
 #property script_show_inputs
-#property version "1.00"
+#property version "1.01"
 
 #include <Generic\HashMap.mqh>
 
@@ -205,7 +205,7 @@ void OnStart()
    for(long c = ChartFirst(); c >= 0; c = ChartNext(c))
    {
       string ea = ChartGetString(c, CHART_EXPERT_NAME);
-      if(ea == "") continue;
+      if(StringLen(ea) == 0) continue;   // 沒掛 EA 的圖表會回傳 NULL，不能只比對 ""
       cnt++;
       PrintFormat("  %s  %s %s", ea, ChartSymbol(c), EnumToString(ChartPeriod(c)));
    }
