@@ -76,3 +76,16 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 放到 `MQL5\Scripts\`，編譯後拖到**要檢查的帳戶**任一圖表執行（不會交易，可在真實帳戶跑）：
 依 Magic Number 統計每個 EA 的淨利、勝率、獲利因子、最大回撤、最近 30/90 天損益，
 列出目前各圖表掛的 EA，並輸出 `Common\Files\EA_Report\EA_Report_<帳號>.csv`。
+
+## TrendScanner.mq5 v2（多指標趨勢掃描 + 進出場計畫，預設不下單）
+
+與 `MarketRegime.mqh`、`SymbolGroups.mqh` 放同一個 `MQL5\Experts\TrendScanner\`，F7 編譯，掛任一圖表。
+
+- **評分 8 票**：均線排列、價在 MA4 上下、MA4 斜率、MACD、RSI、DMI、布林中軌、量能；H1 ≥ 6 票、H4 同向 ≥ 4、ADX ≥ 20。
+- **各商品參數**：第一次執行自動產生 `Common\Files\TrendScanner\params.csv`，修改後重新掛上即生效。
+- **進場**：回檔 38.2~61.8% 現價；未回檔掛 38.2% 限價（4 小時失效）；超過 61.8% 觀望。斐波止損止盈，RR ≥ 1.5。
+- **手數**：每筆風險 0.15%，單筆上限 1 手。
+- **移動止損**：不移動 / 保本 / 保本後 ATR 追蹤 / 保本後擺動高低點追蹤（獲利 1R 啟動）。
+- **加碼**：同商品最多 3 單；最新一單獲利 ≥ 1R 才加，加之前先把既有單移到保本。
+- **安全**：`InpTradeEnabled=false`（只產生計畫）、`InpAllowReal=false`（真實帳戶不下單）、`InpLockAccount` 鎖帳號。
+- 輸出：`Common\Files\TrendScanner\plans_YYYYMMDD.csv`、圖表面板、手機推播。
