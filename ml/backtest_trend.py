@@ -254,6 +254,60 @@ TF_TD = {"M15": dt.timedelta(minutes=15), "M30": dt.timedelta(minutes=30), "H1":
 BAR_TD, CONF_TD = TF_TD["H1"], TF_TD["H4"]      # 由 --tf / --ctf 設定
 
 
+#--------------------------------------------------------------------- 趨勢線濾網（與 TrendScanner 的 InpTLFilter 相同）
+TL_FILTER = False      # --tl-filter
+TL_PIVOT = 5           # 擺動點左右各 N 根
+TL_ATR = 1.0           # 價格距離未突破的壓力/支撐線 <= TL_ATR × ATR 時不進場
+
+
+class TrendlineTracker:
+    """逐根更新最近的下降壓力線 / 上升支撐線（不看未來；收盤突破 0.1 ATR 即作廢）"""
+    def __init__(self, b, n):
+        self.b, self.n = b, n
+        h, l = b["h"], b["l"]
+        self.ph = [i for i in range(n, len(h) - n) if all(h[i] > h[j] for j in range(i - n, i + n + 1) if j != i)]
+        self.pl = [i for i in range(n, len(l) - n) if all(l[i] < l[j] for j in range(i - n, i + n + 1) if j != i)]
+        self.hk = self.lk = 0
+        self.dn = self.up = None
+
+    @staticmethod
+    def value(ln, i):
+        i1, p1, i2, p2 = ln
+        return p2 + (p2 - p1) / (i2 - i1) * (i - i2)
+
+    def update(self, i, a):
+        b, n = self.b, self.n
+        while self.hk < len(self.ph) and self.ph[self.hk] + n <= i:
+            self.hk += 1
+            if self.hk >= 2:
+                i1, i2 = self.ph[self.hk - 2], self.ph[self.hk - 1]
+                if b["h"][i2] < b["h"][i1]:
+                    self.dn = (i1, b["h"][i1], i2, b["h"][i2])
+        while self.lk < len(self.pl) and self.pl[self.lk] + n <= i:
+            self.lk += 1
+            if self.lk >= 2:
+                i1, i2 = self.pl[self.lk - 2], self.pl[self.lk - 1]
+                if b["l"][i2] > b["l"][i1]:
+                    self.up = (i1, b["l"][i1], i2, b["l"][i2])
+        if a and a == a:
+            c = b["c"][i]
+            if self.dn and c > self.value(self.dn, i) + 0.1 * a:
+                self.dn = None
+            if self.up and c < self.value(self.up, i) - 0.1 * a:
+                self.up = None
+
+    def blocked(self, i, d, a):
+        """做多時上方有很近的壓力線、做空時下方有很近的支撐線 → True"""
+        c = self.b["c"][i]
+        if d > 0 and self.dn:
+            v = self.value(self.dn, i)
+            return v >= c and v - c <= TL_ATR * a
+        if d < 0 and self.up:
+            v = self.value(self.up, i)
+            return v <= c and c - v <= TL_ATR * a
+        return False
+
+
 def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
     sc, ax, at = score_series(h1, P)
     sc4, _, _ = score_series(h4, P)
@@ -263,6 +317,7 @@ def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
     pending = None        # 限價單：dict(dir, price, sl, tp, expire_i)
     j4 = -1
     n = len(h1["t"])
+    tl = TrendlineTracker(h1, TL_PIVOT) if TL_FILTER else None
 
     def close_unit(u, price, i, why):
         r = (price - u["entry"]) / u["risk"] * u["dir"]
@@ -316,6 +371,8 @@ def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
                 u["sl"] = target
 
         #--- 3) 訊號
+        if tl:
+            tl.update(i, at[i])
         if h1["t"][i] < start or sc[i] is None:
             continue
         while j4 + 1 < len(t4) and t4[j4 + 1] + CONF_TD <= t_close:
@@ -330,6 +387,8 @@ def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
             continue
         f = fib_state(h1, i)
         if not f or f["dir"] != d or f["ratio"] > 0.618:
+            continue
+        if tl and tl.blocked(i, d, a):
             continue
 
         o_next = h1["o"][i + 1]
@@ -480,12 +539,18 @@ def main():
     ap.add_argument("--tf", default="H1", choices=["M15", "M30", "H1", "H4", "D1"], help="訊號週期（預設 H1）")
     ap.add_argument("--ctf", default="H4", choices=["H1", "H4", "D1", "W1"], help="確認週期（預設 H4）")
     ap.add_argument("--group", default="", help="只測這些分組，例如 crypto 或 major,cross")
+    ap.add_argument("--tl-filter", action="store_true", help="趨勢線濾網：上方有很近的未突破壓力線不做多（空單反之）")
+    ap.add_argument("--tl-pivot", type=int, default=5, help="趨勢線擺動點左右根數")
+    ap.add_argument("--tl-atr", type=float, default=1.0, help="距離趨勢線幾倍 ATR 內不進場")
     ap.add_argument("--grid", action="store_true",
                     help="參數網格：min_score×adx_min×均線組×移動止損，報告樣本內/外（需 --split）")
     a = ap.parse_args()
 
-    global BAR_TD, CONF_TD
+    global BAR_TD, CONF_TD, TL_FILTER, TL_PIVOT, TL_ATR
     BAR_TD, CONF_TD = TF_TD[a.tf], TF_TD[a.ctf]
+    TL_FILTER, TL_PIVOT, TL_ATR = a.tl_filter, a.tl_pivot, a.tl_atr
+    if TL_FILTER:
+        print(f"趨勢線濾網：開（擺動 {TL_PIVOT} 根，距離 {TL_ATR} ATR 內不進場）")
     if CONF_TD <= BAR_TD:
         sys.exit("--ctf 必須比 --tf 大（例如 --tf D1 --ctf W1）")
     h1dir, h4dir = os.path.join(a.data, a.tf), os.path.join(a.data, a.ctf)

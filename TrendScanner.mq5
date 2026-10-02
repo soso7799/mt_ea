@@ -17,12 +17,13 @@
 //|  止損/止盈：斐波位 + ATR 緩衝，RR >= InpMinRR                         |
 //|  手數：每筆風險 InpRiskPct（預設 0.15%）                               |
 //|  移動止損：保本 / ATR 追蹤 / 擺動高低點追蹤                           |
+//|  趨勢線：自動畫壓力/支撐線；InpTLFilter=true 時太靠近未突破的線不進場 |
 //|  加碼：最多 InpMaxUnits 單；最新一單獲利 >= InpAddAtR 倍 R 且趨勢仍成立 |
 //|        才加，加碼前先把既有單止損移到保本 → 任何時刻最多一單的風險   |
 //|                                                                  |
 //|  安裝：單一檔案（已內含 MarketRegime / SymbolGroups），F7 編譯          |
 //+------------------------------------------------------------------+
-#property version   "2.20"
+#property version   "2.30"
 #property description "多指標趨勢掃描、進出場計畫、移動止損與加碼（預設不下單）"
 
 //=== 內嵌 MarketRegime.mqh（單一檔案即可編譯）===
@@ -579,6 +580,12 @@ input double InpAdxMin = 20;
 input int    InpBBPeriod = 20;
 input int    InpVolBars = 20;
 input int    InpMinScore = 6;           // 8 票中至少幾票（同方向）
+input group "=== 趨勢線 ==="
+input bool   InpTLFilter      = false;  // 趨勢線濾網：上方很近有未突破壓力線不做多（空單反之）；回測驗證後再開
+input int    InpTLPivot       = 5;      // 擺動高低點左右各幾根
+input double InpTLAtr         = 1.0;    // 距離趨勢線幾倍 ATR 內不進場
+input bool   InpTLDraw        = true;   // 在本圖表畫出自動趨勢線（只顯示）
+input int    InpTLBars        = 300;    // 畫線回看 K 棒數
 input group "=== 計畫 / 風控 ==="
 input double InpMinRR         = 1.5;    // 最低報酬風險比
 input double InpRiskPct       = 0.15;   // 每筆風險（帳戶餘額 %）
@@ -764,6 +771,107 @@ bool Score(const string s, const ENUM_TIMEFRAMES tf, const SParams &p, const SHa
    return true;
 }
 
+
+//+------------------------------------------------------------------+
+//| 自動趨勢線（與回測 TrendlineTracker 相同邏輯）                       |
+//|  壓力線 = 最近兩個擺動高點相連且後高 < 前高；支撐線反之             |
+//|  收盤突破線 0.1 ATR 即作廢；只用已收盤 K 棒                          |
+//+------------------------------------------------------------------+
+struct STLine { bool ok; int i1, i2; double p1, p2; datetime t1, t2; };
+
+double TLValue(const STLine &ln, const int i) { return ln.p2 + (ln.p2 - ln.p1) / (ln.i2 - ln.i1) * (i - ln.i2); }
+
+// 回傳 last = 最後一根已收盤 K 棒的索引（舊→新排列），dn / up 為目前有效的線
+bool TLCompute(const string s, const ENUM_TIMEFRAMES tf, const int n, const double atr, STLine &dn, STLine &up, int &last)
+{
+   dn.ok = false; up.ok = false;
+   MqlRates r[];
+   ArraySetAsSeries(r, false);
+   int L = CopyRates(s, tf, 1, InpTLBars, r);          // 舊 → 新，r[L-1] = 最後收盤 K 棒
+   if(L < 4 * n + 2 || atr <= 0) return false;
+   last = L - 1;
+   int ph1 = -1, ph2 = -1, pl1 = -1, pl2 = -1;
+   for(int i = 2 * n; i < L; i++)
+   {
+      int j = i - n;                                      // 第 i 根收盤時才確認 j 是否為擺動點
+      bool isH = true, isL = true;
+      for(int k = j - n; k <= j + n; k++)
+      {
+         if(k == j) continue;
+         if(r[k].high >= r[j].high) isH = false;
+         if(r[k].low  <= r[j].low)  isL = false;
+      }
+      if(isH)
+      {
+         ph1 = ph2; ph2 = j;
+         if(ph1 >= 0 && r[ph2].high < r[ph1].high)
+         { dn.ok = true; dn.i1 = ph1; dn.i2 = ph2; dn.p1 = r[ph1].high; dn.p2 = r[ph2].high; dn.t1 = r[ph1].time; dn.t2 = r[ph2].time; }
+      }
+      if(isL)
+      {
+         pl1 = pl2; pl2 = j;
+         if(pl1 >= 0 && r[pl2].low > r[pl1].low)
+         { up.ok = true; up.i1 = pl1; up.i2 = pl2; up.p1 = r[pl1].low; up.p2 = r[pl2].low; up.t1 = r[pl1].time; up.t2 = r[pl2].time; }
+      }
+      if(dn.ok && r[i].close > TLValue(dn, i) + 0.1 * atr) dn.ok = false;
+      if(up.ok && r[i].close < TLValue(up, i) - 0.1 * atr) up.ok = false;
+   }
+   return true;
+}
+
+// 做多時上方很近有壓力線、做空時下方很近有支撐線 → true（不進場）
+bool TLBlocked(const string s, const int dir, const double atr, string &why)
+{
+   STLine dn, up; int last;
+   if(!TLCompute(s, InpTF, InpTLPivot, atr, dn, up, last)) return false;
+   double c = iClose(s, InpTF, 1);
+   if(dir > 0 && dn.ok)
+   {
+      double v = TLValue(dn, last);
+      if(v >= c && v - c <= InpTLAtr * atr) { why = StringFormat("上方壓力線 %.5f", v); return true; }
+   }
+   if(dir < 0 && up.ok)
+   {
+      double v = TLValue(up, last);
+      if(v <= c && c - v <= InpTLAtr * atr) { why = StringFormat("下方支撐線 %.5f", v); return true; }
+   }
+   return false;
+}
+
+void TLDraw()
+{
+   if(!InpTLDraw) return;
+   double atr = 0;
+   int k = SymIndex(_Symbol);
+   if(k < 0 || !Buf(g_hm[k].atr, 0, 1, atr))
+   {
+      int h = iATR(_Symbol, InpTF, 14);                   // 本圖表商品不在掃描清單時
+      double a[1];
+      if(h != INVALID_HANDLE && CopyBuffer(h, 0, 1, 1, a) == 1) atr = a[0];
+      if(h != INVALID_HANDLE) IndicatorRelease(h);
+   }
+   STLine dn, up; int last;
+   ObjectDelete(0, "TS_TL_DN"); ObjectDelete(0, "TS_TL_UP");
+   if(atr <= 0 || !TLCompute(_Symbol, InpTF, InpTLPivot, atr, dn, up, last)) return;
+   if(dn.ok)
+   {
+      ObjectCreate(0, "TS_TL_DN", OBJ_TREND, 0, dn.t1, dn.p1, dn.t2, dn.p2);
+      ObjectSetInteger(0, "TS_TL_DN", OBJPROP_COLOR, clrTomato);
+      ObjectSetInteger(0, "TS_TL_DN", OBJPROP_RAY_RIGHT, true);
+      ObjectSetInteger(0, "TS_TL_DN", OBJPROP_WIDTH, 2);
+      ObjectSetString(0, "TS_TL_DN", OBJPROP_TOOLTIP, "TrendScanner 壓力線");
+   }
+   if(up.ok)
+   {
+      ObjectCreate(0, "TS_TL_UP", OBJ_TREND, 0, up.t1, up.p1, up.t2, up.p2);
+      ObjectSetInteger(0, "TS_TL_UP", OBJPROP_COLOR, clrDodgerBlue);
+      ObjectSetInteger(0, "TS_TL_UP", OBJPROP_RAY_RIGHT, true);
+      ObjectSetInteger(0, "TS_TL_UP", OBJPROP_WIDTH, 2);
+      ObjectSetString(0, "TS_TL_UP", OBJPROP_TOOLTIP, "TrendScanner 支撐線");
+   }
+   ChartRedraw();
+}
+
 //+------------------------------------------------------------------+
 //| 掃描                                                              |
 //+------------------------------------------------------------------+
@@ -848,6 +956,11 @@ void Scan()
       SRegime r;
       if(!g_fib.Evaluate(s, r)) { pending++; continue; }
       if(r.swingDir != dir || r.fibRatio > 0.618) continue;          // 波段方向不符或回檔太深
+      if(InpTLFilter)
+      {
+         string why;
+         if(TLBlocked(s, dir, r.atr, why)) { PrintFormat("TrendScanner：%s %s 被趨勢線擋下（%s）", s, dir > 0 ? "做多" : "做空", why); continue; }
+      }
 
       double price = (dir > 0) ? SymbolInfoDouble(s, SYMBOL_ASK) : SymbolInfoDouble(s, SYMBOL_BID);
       string mode; double entry;
@@ -1207,6 +1320,7 @@ void OnDeinit(const int reason)
    EventKillTimer();
    for(int i = 0; i < ArraySize(g_syms); i++) { FreeHandles(g_hm[i]); FreeHandles(g_hc[i]); }
    g_fib.Release();
+   ObjectDelete(0, "TS_TL_DN"); ObjectDelete(0, "TS_TL_UP");
    Comment("");
 }
 
@@ -1220,6 +1334,7 @@ void OnTimer()
    if(due)
    {
       Scan();
+      TLDraw();
       g_lastBar = bar;
       // 第一次常有資料未備妥：沒有計畫時 2 分鐘後再掃一次
       g_lastScan = (ArraySize(g_plans) == 0 && g_lastScan == 0) ? now - InpScanMinutes * 60 + 120 : now;
