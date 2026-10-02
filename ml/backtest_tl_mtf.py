@@ -230,7 +230,7 @@ def main():
     appdata = os.environ.get("APPDATA", "")
     ap.add_argument("--data", default=os.path.join(appdata, "MetaQuotes", "Terminal", "Common", "Files", "FTMO_Data"))
     ap.add_argument("--htf", default="H1", choices=["H1", "H4"], help="畫線週期")
-    ap.add_argument("--ltf", default="M15", choices=["M5", "M15", "M30"], help="進場週期")
+    ap.add_argument("--ltf", default="M15", choices=["M5", "M15", "M30", "H1"], help="進場週期")
     ap.add_argument("--symbols", default="")
     ap.add_argument("--group", default="", help="例如 major,cross")
     ap.add_argument("--years", type=float, default=3)
