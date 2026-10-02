@@ -127,3 +127,9 @@ python ml/backtest_trend.py --symbols EURUSD,XAUUSD --trail swing --units 1
 
 取代舊 Module1：不再用 Python 登入真實帳戶逐筆匯出，改為「ftmo_to_gordon.py 轉換 → update_all_data.py → 刷新儀表板」；
 「市場清單」的勾選仍有效；統一路徑為 `D:\整合計畫\整理後\ExportCSV\merged`。
+
+## ml/backtest_trendline.py — 趨勢線策略回測
+
+程式自動以「最近兩個擺動高點 / 低點」畫壓力線 / 支撐線（不看未來），測兩種玩法：碰線反彈（bounce）與突破（break），
+參數網格：擺動 N（3/5/8）× 模式 × RR（1.5/2/3），報告樣本內/外、分組、商品。
+`python backtest_trendline.py --grid --years 3 --split 2025-01-01`
