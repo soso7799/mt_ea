@@ -249,6 +249,11 @@ def calc_stops(f, d, price, a):
 
 
 #--------------------------------------------------------------------- 回測一個商品
+TF_TD = {"M15": dt.timedelta(minutes=15), "M30": dt.timedelta(minutes=30), "H1": dt.timedelta(hours=1),
+         "H4": dt.timedelta(hours=4), "D1": dt.timedelta(days=1), "W1": dt.timedelta(days=7)}
+BAR_TD, CONF_TD = TF_TD["H1"], TF_TD["H4"]      # 由 --tf / --ctf 設定
+
+
 def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
     sc, ax, at = score_series(h1, P)
     sc4, _, _ = score_series(h4, P)
@@ -265,7 +270,7 @@ def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
                            exit=price, r=r, why=why, unit=u["unit"]))
 
     for i in range(SWING_BARS, n - 1):
-        t_close = h1["t"][i] + dt.timedelta(hours=1)            # 第 i 根收盤 = 第 i+1 根開盤
+        t_close = h1["t"][i] + BAR_TD            # 第 i 根收盤 = 第 i+1 根開盤
         #--- 1) 第 i 根K棒內：限價成交、止損/止盈觸發
         hi, lo = h1["h"][i], h1["l"][i]
         spread = h1["sp"][i] * point
@@ -313,7 +318,7 @@ def backtest_symbol(sym, h1, h4, P, point, trail, max_units, start):
         #--- 3) 訊號
         if h1["t"][i] < start or sc[i] is None:
             continue
-        while j4 + 1 < len(t4) and t4[j4 + 1] + dt.timedelta(hours=4) <= t_close:
+        while j4 + 1 < len(t4) and t4[j4 + 1] + CONF_TD <= t_close:
             j4 += 1
         if j4 < 0 or sc4[j4] is None:
             continue
@@ -472,14 +477,21 @@ def main():
     ap.add_argument("--units", type=int, default=3)
     ap.add_argument("--split", default="", help="樣本內/外分界日 YYYY-MM-DD")
     ap.add_argument("--out", default="backtest_trend_trades.csv")
+    ap.add_argument("--tf", default="H1", choices=["M15", "M30", "H1", "H4", "D1"], help="訊號週期（預設 H1）")
+    ap.add_argument("--ctf", default="H4", choices=["H1", "H4", "D1", "W1"], help="確認週期（預設 H4）")
     ap.add_argument("--group", default="", help="只測這些分組，例如 crypto 或 major,cross")
     ap.add_argument("--grid", action="store_true",
                     help="參數網格：min_score×adx_min×均線組×移動止損，報告樣本內/外（需 --split）")
     a = ap.parse_args()
 
-    h1dir, h4dir = os.path.join(a.data, "H1"), os.path.join(a.data, "H4")
+    global BAR_TD, CONF_TD
+    BAR_TD, CONF_TD = TF_TD[a.tf], TF_TD[a.ctf]
+    if CONF_TD <= BAR_TD:
+        sys.exit("--ctf 必須比 --tf 大（例如 --tf D1 --ctf W1）")
+    h1dir, h4dir = os.path.join(a.data, a.tf), os.path.join(a.data, a.ctf)
     if not os.path.isdir(h1dir) or not os.path.isdir(h4dir):
-        sys.exit(f"找不到 {h1dir} 或 {h4dir}（先用 HistoryExporter 匯出 H1、H4）")
+        sys.exit(f"找不到 {h1dir} 或 {h4dir}（先用 HistoryExporter 匯出 {a.tf}、{a.ctf}）")
+    print(f"週期：訊號 {a.tf}、確認 {a.ctf}")
     syms = [s.strip() for s in a.symbols.split(",") if s.strip()] or \
         sorted(f[:-4] for f in os.listdir(h1dir) if f.endswith(".csv") and os.path.exists(os.path.join(h4dir, f)))
     if a.group:
@@ -524,7 +536,7 @@ def main():
                         t["open"], t["close"], t["entry"], t["exit"], f"{t['r']:.3f}", t["why"]])
 
     print("\n" + "=" * 86)
-    print(f"TrendScanner v2 回測  近 {a.years:g} 年  移動止損={a.trail}  加碼最多 {a.units} 單  每筆風險 {RISK_PCT}%")
+    print(f"TrendScanner v2 回測  {a.tf}/{a.ctf}  近 {a.years:g} 年  移動止損={a.trail}  加碼最多 {a.units} 單  每筆風險 {RISK_PCT}%")
     print("=" * 86)
     print(HEAD)
     print(line("全部", stats([t["r"] for t in all_trades])))
