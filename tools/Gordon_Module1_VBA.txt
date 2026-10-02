@@ -1,0 +1,209 @@
+'====================================================================
+' Gordon_FTMO_Data_Console — Module1（新版：資料改由 MT5 HistoryExporter EA 提供）
+'
+' 使用方式：Alt+F11 → 左邊 Module1 → 全選刪除 → 整段貼上本檔內容 → 存檔
+'
+' 與舊版差異
+'   - 不再由 Python 登入 MT5（舊版會登入「真實帳戶」531292442，一組一組抓）
+'   - 資料由 MT5 模擬帳戶上的 HistoryExporter EA 每 10 天自動下載到
+'     %APPDATA%\MetaQuotes\Terminal\Common\Files\FTMO_Data
+'   - 本模組只做：轉成 merged 格式 → update_all_data.py → 刷新儀表板
+'   - 修正舊版路徑不一致（VBA 用 D:\資料查詢，Python 用 D:\整合計畫\整理後），
+'     現在統一用 D:\整合計畫\整理後\ExportCSV\merged
+'
+' 內含程序
+'   1. GDH_UpdateEverything    —— 一鍵按鈕（原按鈕不用改）
+'   2. GDH_BatchExportSelected —— 保留名稱，避免舊按鈕失效；改為只轉換勾選的商品/週期
+'   3. GDH_CheckedList / GDH_Quote / GDH_Python —— 小工具
+'
+' 「市場清單」的勾選仍然有效：C 欄勾商品、D 欄勾週期（ALL = D1/H4/H1/M15）；
+' 都沒勾 = 全部。M5 一定會轉（update_all_data.py 需要）。
+'
+' 前置作業（一次）：把 ftmo_to_gordon.py 放到 D:\整合計畫\ftmo_to_gordon.py
+'                  （或與本活頁簿同一資料夾）
+'====================================================================
+Option Explicit
+
+Private Const MERGED_FOLDER As String = "D:\整合計畫\整理後\ExportCSV\merged"
+Private Const CONVERT_SCRIPT As String = "D:\整合計畫\ftmo_to_gordon.py"
+Private Const UPDATE_SCRIPT As String = "D:\整合計畫\update_all_data.py"
+
+
+'--------------------------------------------------------------------
+' 一鍵按鈕：轉換 → update_all_data.py → 刷新儀表板
+'--------------------------------------------------------------------
+Public Sub GDH_UpdateEverything()
+    Dim t0 As Single: t0 = Timer
+
+    Application.StatusBar = "步驟 1/3：轉換 HistoryExporter 資料..."
+    DoEvents
+    If Not GDH_Convert(False) Then
+        Application.StatusBar = False
+        Exit Sub
+    End If
+
+    ' ---------- 步驟2：產生儀表板用的CSV ----------
+    Application.StatusBar = "步驟 2/3：更新儀表板資料中..."
+    DoEvents
+    If Dir$(UPDATE_SCRIPT) = "" Then
+        MsgBox "找不到 update_all_data.py：" & UPDATE_SCRIPT, vbCritical, "環境錯誤"
+        Application.StatusBar = False
+        Exit Sub
+    End If
+    Dim shell As Object: Set shell = CreateObject("WScript.Shell")
+    Dim updateExit As Long
+    updateExit = shell.Run(GDH_Quote(GDH_Python()) & " " & GDH_Quote(UPDATE_SCRIPT), 0, True)
+    If updateExit <> 0 Then
+        MsgBox "update_all_data.py 執行失敗，ExitCode=" & updateExit, vbExclamation, "步驟2失敗"
+        Application.StatusBar = False
+        Exit Sub
+    End If
+
+    ' ---------- 步驟3：刷新畫面（找出開著、含「儀表板總表」分頁的活頁簿）----------
+    Application.StatusBar = "步驟 3/3：刷新畫面中..."
+    DoEvents
+    Dim wbDash As Workbook, wbTest As Workbook
+    Dim shTest As Object, hasSheet As Boolean
+    For Each wbTest In Application.Workbooks
+        hasSheet = False
+        Set shTest = Nothing
+        On Error Resume Next
+        Set shTest = wbTest.Sheets("儀表板總表")
+        hasSheet = Not shTest Is Nothing
+        On Error GoTo 0
+        If hasSheet Then
+            Set wbDash = wbTest
+            Exit For
+        End If
+    Next wbTest
+
+    If wbDash Is Nothing Then
+        MsgBox "找不到含有「儀表板總表」分頁的活頁簿，請確認那個資料儀表板檔案有打開。" & vbCrLf & _
+               "（資料已更新，只差刷新畫面）", vbExclamation, "步驟3找不到儀表板活頁簿"
+    Else
+        Application.ScreenUpdating = False
+        Application.Run "'" & wbDash.Name & "'!Update關卡"
+        wbDash.Sheets("儀表板總表").Activate
+        Application.Run "'" & wbDash.Name & "'!RefreshDashboard"
+        Application.ScreenUpdating = True
+    End If
+
+    Application.StatusBar = False
+    MsgBox "全部更新完成！" & vbCrLf & _
+           "（轉換 HistoryExporter 資料 + 更新儀表板 + 刷新畫面）" & vbCrLf & vbCrLf & _
+           "耗時：" & Format(Timer - t0, "0.0") & " 秒" & vbCrLf & Now, _
+           vbInformation, "GDH_UpdateEverything 完成"
+End Sub
+
+
+'--------------------------------------------------------------------
+' 舊按鈕相容：只做轉換（不再登入 MT5 下載）
+'--------------------------------------------------------------------
+Public Sub GDH_BatchExportSelected()
+    If GDH_Convert(True) Then
+        MsgBox "轉換完成，資料在：" & vbCrLf & MERGED_FOLDER & vbCrLf & vbCrLf & _
+               "（下載由 MT5 的 HistoryExporter EA 每 10 天自動執行，不需要再按匯出）", _
+               vbInformation, "完成"
+    End If
+End Sub
+
+
+'--------------------------------------------------------------------
+' 執行 ftmo_to_gordon.py；askConfirm = 先顯示確認視窗
+'--------------------------------------------------------------------
+Private Function GDH_Convert(ByVal askConfirm As Boolean) As Boolean
+    GDH_Convert = False
+
+    Dim py As String: py = GDH_Python()
+    If py = "" Then
+        MsgBox "找不到 Python（hermes venv 或系統 python）。", vbCritical, "環境錯誤"
+        Exit Function
+    End If
+
+    Dim script As String: script = CONVERT_SCRIPT
+    If Dir$(script) = "" Then script = ThisWorkbook.Path & "\ftmo_to_gordon.py"
+    If Dir$(script) = "" Then
+        MsgBox "找不到 ftmo_to_gordon.py，請放到 " & CONVERT_SCRIPT & "（或本活頁簿同一資料夾）。", _
+               vbCritical, "環境錯誤"
+        Exit Function
+    End If
+
+    Dim syms As String, tfs As String
+    syms = GDH_CheckedList(1, 3, False)       ' A 欄商品、C 欄勾選
+    tfs = GDH_CheckedList(2, 4, True)         ' B 欄週期、D 欄勾選
+    If tfs <> "" And InStr(1, "," & tfs & ",", ",M5,", vbTextCompare) = 0 Then tfs = tfs & ",M5"
+
+    If askConfirm Then
+        If MsgBox("即將轉換：" & vbCrLf & _
+                  "商品：" & IIf(syms = "", "全部", syms) & vbCrLf & _
+                  "週期：" & IIf(tfs = "", "全部", tfs) & vbCrLf & vbCrLf & "確定開始？", _
+                  vbQuestion + vbYesNo, "確認轉換") = vbNo Then Exit Function
+    End If
+
+    Dim cmd As String
+    cmd = GDH_Quote(py) & " " & GDH_Quote(script) & " --out " & GDH_Quote(MERGED_FOLDER)
+    If syms <> "" Then cmd = cmd & " --symbols " & GDH_Quote(syms)
+    If tfs <> "" Then cmd = cmd & " --tfs " & GDH_Quote(tfs)
+
+    Dim shell As Object: Set shell = CreateObject("WScript.Shell")
+    Dim rc As Long
+    rc = shell.Run(cmd, 0, True)
+    If rc <> 0 Then
+        MsgBox "ftmo_to_gordon.py 執行失敗，ExitCode=" & rc & vbCrLf & _
+               "常見原因：HistoryExporter 還沒跑完第一次（找不到 FTMO_Data 資料夾）。", _
+               vbExclamation, "轉換失敗"
+        Exit Function
+    End If
+    GDH_Convert = True
+End Function
+
+
+'--------------------------------------------------------------------
+' 讀「市場清單」勾選：valueCol 欄的值、markCol 欄有標記就列入；回傳逗號清單
+'--------------------------------------------------------------------
+Private Function GDH_CheckedList(ByVal valueCol As Long, ByVal markCol As Long, ByVal isTF As Boolean) As String
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("市場清單")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
+    Dim lastRow As Long, r As Long, v As String, out As String
+    lastRow = ws.Cells(ws.Rows.Count, valueCol).End(xlUp).Row
+    For r = 2 To lastRow
+        v = Trim$(CStr(ws.Cells(r, valueCol).Value))
+        If Len(v) > 0 And Len(Trim$(CStr(ws.Cells(r, markCol).Value))) > 0 Then
+            If isTF Then v = UCase$(v)
+            If isTF And v = "ALL" Then
+                Dim a As Variant, k As Long
+                a = Array("D1", "H4", "H1", "M15")
+                For k = LBound(a) To UBound(a)
+                    If Not seen.Exists(a(k)) Then seen.Add a(k), True: out = out & "," & a(k)
+                Next k
+            ElseIf Not seen.Exists(UCase$(v)) Then
+                seen.Add UCase$(v), True
+                out = out & "," & v
+            End If
+        End If
+    Next r
+    If Len(out) > 0 Then out = Mid$(out, 2)
+    GDH_CheckedList = out
+End Function
+
+
+Private Function GDH_Python() As String
+    Dim p As String
+    p = Environ$("LOCALAPPDATA") & "\hermes\hermes-agent\venv\Scripts\python.exe"
+    If Dir$(p) <> "" Then GDH_Python = p: Exit Function
+    p = Environ$("LOCALAPPDATA") & "\Programs\Python\Python312\python.exe"
+    If Dir$(p) <> "" Then GDH_Python = p: Exit Function
+    p = Environ$("LOCALAPPDATA") & "\Programs\Python\Python311\python.exe"
+    If Dir$(p) <> "" Then GDH_Python = p: Exit Function
+    GDH_Python = ""
+End Function
+
+
+Private Function GDH_Quote(ByVal value As String) As String
+    GDH_Quote = Chr$(34) & value & Chr$(34)
+End Function

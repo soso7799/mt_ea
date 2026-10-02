@@ -11,7 +11,8 @@
 //--------------------------------------------------------------------
 // 支援幣別
 //--------------------------------------------------------------------
-const int SYMBOL_COUNT = 36;
+// MQL5 的陣列大小必須是編譯期常數，const int 不行（會出現 invalid index value），要用 #define
+#define SYMBOL_COUNT 37
 
 const string SYMBOLS[SYMBOL_COUNT] = {
 
@@ -35,6 +36,7 @@ const string SYMBOLS[SYMBOL_COUNT] = {
    "USDJPY",
    "USDMXN",
    "USDTRY",
+   "USDCNH",   // 離岸人民幣（v5.8 新增，fx_rules 為估計值）
    // ⚠️ 以下7個是預留（金屬/石油/天然氣），一勞永逸先擴充進來備用，
    // 目前 MultiCurrency_EA.mq5 沒有交易這些商品，加進來只是讓 F段
    // 背景監控涵蓋得到；要實際交易還是要去 fx_rules[] 校準SL/TP數字。
@@ -125,6 +127,16 @@ private:
 
    datetime m_lastBarTimeF[SYMBOL_COUNT];
 
+   // SYMBOLS[] 對應到券商實際名稱（處理 GBPJPY.m / GBPJPYpro / m.GBPJPY 等後綴前綴），
+   // 找不到則為 ""，F段背景監控會略過該商品
+   string   m_symName[SYMBOL_COUNT];
+
+   // ATR(M1,1) handle 快取：原本 IsVolatilityNormal / GetStatusReport 每次呼叫都
+   // iATR() 建立新 handle 再立即釋放，新 handle 通常還沒算好，CopyBuffer 失敗就直接放行，
+   // 等於波動過濾從未生效（參考 BeeQuant12 BQ_Indicators.mqh 的修正）
+   string   m_atrSym[];
+   int      m_atrH[];
+
    datetime lastResetDay;
    bool     forceClosedToday;
 
@@ -147,10 +159,21 @@ private:
    //-----------------------------------------------------------------
    // v4 私有工具
    //-----------------------------------------------------------------
+   //-----------------------------------------------------------------
+   // 排程時間 = 伺服器時間 + ScheduleOffsetHours（預設 6 = 冬令台灣時間）
+   // 所有每日排程（交易日起點、強平、禁單時段、每日重置）都用這個時間，
+   // 跟著 FTMO 伺服器自動切換冬令/夏令：夏令時 05:45 對應台灣 04:45，
+   // 永遠在伺服器換日(00:00)前 15 分鐘強平。回測時伺服器時間照樣正確。
+   //-----------------------------------------------------------------
+   datetime SchedNow()
+   {
+      return (datetime)((long)TimeTradeServer() + (long)ScheduleOffsetHours * 3600);
+   }
+
    MqlDateTime LocalNow()
    {
       MqlDateTime t;
-      TimeToStruct(TimeLocal(), t);
+      TimeToStruct(SchedNow(), t);
       return t;
    }
 
@@ -181,12 +204,190 @@ private:
       return s;
    }
 
+   //-----------------------------------------------------------------
+   // 券商商品名稱對應（參考 BeeQuant12 BQ_Multi.mqh）
+   //-----------------------------------------------------------------
+   string _resolveName(string want)
+   {
+      bool custom = false;
+      if(SymbolExist(want, custom))
+      {
+         SymbolSelect(want, true);
+         return want;
+      }
+
+      string up = want;
+      StringToUpper(up);
+      string best    = "";
+      bool   bestSel = false;
+
+      for(int i=0; i<SymbolsTotal(false); i++)
+      {
+         string name = SymbolName(i, false);
+         string u    = name;
+         StringToUpper(u);
+         int p = StringFind(u, up);
+         if(p < 0 || p > 3) continue;          // 只接受短前綴，例如 m.GBPJPY
+
+         bool sel = (SymbolInfoInteger(name, SYMBOL_SELECT) != 0);
+         if(best == "" || (sel && !bestSel) || (sel == bestSel && StringLen(name) < StringLen(best)))
+         {
+            best    = name;
+            bestSel = sel;
+         }
+      }
+
+      if(best != "") SymbolSelect(best, true);
+      return best;
+   }
+
+   // 依券商實際名稱找 SYMBOLS[] 索引
+   int _idxOf(string sym)
+   {
+      for(int i=0; i<SYMBOL_COUNT; i++)
+         if(m_symName[i] != "" && m_symName[i] == sym) return i;
+      return SymIdx(sym);
+   }
+
+   int _atrHandle(string sym)
+   {
+      for(int i=0; i<ArraySize(m_atrSym); i++)
+         if(m_atrSym[i] == sym) return m_atrH[i];
+
+      int h = iATR(sym, PERIOD_M1, 1);
+      if(h == INVALID_HANDLE) return INVALID_HANDLE;
+
+      int n = ArraySize(m_atrSym);
+      ArrayResize(m_atrSym, n+1);
+      ArrayResize(m_atrH,   n+1);
+      m_atrSym[n] = sym;
+      m_atrH[n]   = h;
+      return h;
+   }
+
+   // 取 ATR(M1,1) pips；取值失敗回傳 false（handle 剛建立尚未計算完成時常見）
+   bool _atrPips(string sym, double &atrPips)
+   {
+      int h = _atrHandle(sym);
+      if(h == INVALID_HANDLE) return false;
+
+      double buf[1];
+      if(CopyBuffer(h, 0, 0, 1, buf) != 1) return false;
+      if(buf[0] == EMPTY_VALUE || !MathIsValidNumber(buf[0])) return false;
+
+      atrPips = buf[0] / PipSize(sym);
+      return true;
+   }
+
+   //-----------------------------------------------------------------
+   // 下單安全工具（參考 BeeQuant12 BQ_Trade.mqh）
+   //-----------------------------------------------------------------
+   int _volDigits(string sym)
+   {
+      double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      int d = 0;
+      while(step > 0 && step < 1.0-1e-9 && d < 8) { step *= 10.0; d++; }
+      return d;
+   }
+
+   double _normPrice(string sym, double p)
+   {
+      int    dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      double ts = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+      if(ts <= 0) return NormalizeDouble(p, dg);
+      return NormalizeDouble(MathRound(p/ts)*ts, dg);
+   }
+
+   // 券商允許的最小 SL/TP 距離（STOPS_LEVEL 與 FREEZE_LEVEL 取大者）
+   double _minStopDist(string sym)
+   {
+      long lvl = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+      long frz = SymbolInfoInteger(sym, SYMBOL_TRADE_FREEZE_LEVEL);
+      return (double)MathMax(lvl, frz) * SymbolInfoDouble(sym, SYMBOL_POINT);
+   }
+
+   // 把太靠近的 SL/TP 推到最小距離之外；ref = 平倉參考價（買單用 Bid、賣單用 Ask）
+   void _fixStops(string sym, bool isBuy, double ref, double &sl, double &tp)
+   {
+      double d = _minStopDist(sym) + SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(sl > 0)
+      {
+         if(isBuy  && ref-sl < d) sl = ref - d;
+         if(!isBuy && sl-ref < d) sl = ref + d;
+         sl = _normPrice(sym, sl);
+      }
+      if(tp > 0)
+      {
+         if(isBuy  && tp-ref < d) tp = ref + d;
+         if(!isBuy && ref-tp < d) tp = ref - d;
+         tp = _normPrice(sym, tp);
+      }
+   }
+
+   bool _resultOK(string sym, string what)
+   {
+      uint rc = trade.ResultRetcode();
+      if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL)
+         return true;
+      PrintFormat("❌ [%s] %s 失敗 retcode=%u %s", sym, what, rc, trade.ResultRetcodeDescription());
+      return false;
+   }
+
+   bool _retryable()
+   {
+      uint rc = trade.ResultRetcode();
+      return (rc == TRADE_RETCODE_REQUOTE || rc == TRADE_RETCODE_PRICE_CHANGED ||
+              rc == TRADE_RETCODE_PRICE_OFF || rc == TRADE_RETCODE_TIMEOUT);
+   }
+
+   // 同一商品的「ATR 異常」訊息每分鐘最多印一次（EA 每秒檢查，避免洗版）
+   string   m_volMsgSym[];
+   datetime m_volMsgTime[];
+   bool _volMsgDue(string sym)
+   {
+      datetime now = TimeTradeServer();
+      int n = ArraySize(m_volMsgSym);
+      for(int i=0; i<n; i++)
+      {
+         if(m_volMsgSym[i] != sym) continue;
+         if(now - m_volMsgTime[i] < 60) return false;
+         m_volMsgTime[i] = now;
+         return true;
+      }
+      ArrayResize(m_volMsgSym,  n+1);
+      ArrayResize(m_volMsgTime, n+1);
+      m_volMsgSym[n]  = sym;
+      m_volMsgTime[n] = now;
+      return true;
+   }
+
+   bool _closeTicket(ulong ticket, string sym)
+   {
+      if(!TradingEnabled) return false;   // 只統計模式：絕不平倉
+      trade.SetTypeFillingBySymbol(sym);
+      trade.PositionClose(ticket);
+      return _resultOK(sym, "平倉");
+   }
+
    int FindRule(string sym)
    {
       string core = GetCoreSymbol(sym);
       for(int i=0; i<ArraySize(fx_rules); i++)
          if(fx_rules[i].symbol == core) return i;
       return -1;
+   }
+
+   // 排程時間 - 伺服器時間。成交歷史是伺服器時間，交易日起點要換算後才能拿去 HistorySelect
+   long ServerOffset()
+   {
+      return (long)ScheduleOffsetHours * 3600;
+   }
+
+   // 今日（排程時間 TradingStart 起）成交歷史，以伺服器時間查詢
+   bool SelectTodayHistory()
+   {
+      datetime from = (datetime)((long)GetTradingDayStart() - ServerOffset());
+      return HistorySelect(from, TimeTradeServer() + 60);
    }
 
    datetime GetTradingDayStart()
@@ -197,7 +398,7 @@ private:
       t.sec  = 0;
 
       datetime start = StructToTime(t);
-      if(TimeLocal() < start)
+      if(SchedNow() < start)
          return start - 86400;
 
       return start;
@@ -208,8 +409,10 @@ private:
    //-----------------------------------------------------------------
    bool _checkNewBarF(int idx)
    {
+      if(m_symName[idx] == "") return false;
+
       datetime barTime[1];
-      if(CopyTime(SYMBOLS[idx], m_tf, 0, 1, barTime) != 1) return false;
+      if(CopyTime(m_symName[idx], m_tf, 0, 1, barTime) != 1) return false;
 
       if(barTime[0] != m_lastBarTimeF[idx])
       {
@@ -229,7 +432,8 @@ private:
 
    ENUM_SIG _calcSignalShift(int idx, int shift)
    {
-      string sym = SYMBOLS[idx];
+      string sym = m_symName[idx];
+      if(sym == "") return SIG_NONE;
       double emaFast, emaSlow, rsi, bbUpper, bbLower, bbMid;
       double macdMain, macdSigVal, stochK, stochD;
 
@@ -273,7 +477,7 @@ private:
    int GetSymbolStopLossCount(string sym)
    {
       int cnt = 0;
-      HistorySelect(GetTradingDayStart(), TimeLocal());
+      SelectTodayHistory();
 
       for(int i=HistoryDealsTotal()-1; i>=0; i--)
       {
@@ -294,7 +498,7 @@ private:
    double GetTodayClosedProfit()
    {
       double p = 0.0;
-      HistorySelect(GetTradingDayStart(), TimeLocal());
+      SelectTodayHistory();
 
       for(int i=HistoryDealsTotal()-1; i>=0; i--)
       {
@@ -360,7 +564,7 @@ private:
          ulong ticket = pos.Ticket();
          string sym   = pos.Symbol();
 
-         if(trade.PositionClose(ticket))
+         if(_closeTicket(ticket, sym))
             Print("✅ 全平 ", sym, " | ", reason);
       }
    }
@@ -372,7 +576,7 @@ private:
          if(!pos.SelectByIndex(i) || pos.Magic() != magic || pos.Symbol() != sym) continue;
 
          ulong ticket = pos.Ticket();
-         if(trade.PositionClose(ticket))
+         if(_closeTicket(ticket, sym))
             Print("✅ 平倉 ", sym, " | ", reason);
       }
    }
@@ -381,6 +585,16 @@ public:
    //-----------------------------------------------------------------
    // v4 公開參數
    //-----------------------------------------------------------------
+   // 目前在新聞時段的商品，格式 ";USDJPY;EURUSD;"（由 EA 每個循環更新）
+   // false = 只統計模式：OpenMarket 不下單、不平倉、不改單、不做持倉管理
+   bool   TradingEnabled;
+
+   string NewsBlocked;
+   bool   IsNewsBlocked(string sym) { return StringFind(NewsBlocked, ";" + sym + ";") >= 0; }
+
+   // 全部平倉（週五收盤前等 EA 端規則使用）
+   void   CloseAllPositions(string reason) { CloseAll(reason); }
+
    double DayLossLimit;
    double AccountEquityFloor;
    double VolatilityMultiplier;
@@ -390,6 +604,8 @@ public:
    int MaxSwingBars;
    int StepProfitPips;
    int StepLockPips;
+
+   int ScheduleOffsetHours;   // 排程時間 = 伺服器時間 + N 小時（FTMO + 台灣 = 6，冬夏令自動跟隨伺服器）
 
    int TradingStartHour; int TradingStartMin;
    int NoTradeStartHour; int NoTradeStartMin;
@@ -404,13 +620,18 @@ public:
    //-----------------------------------------------------------------
    void InitRules()
    {
-      ArrayResize(fx_rules, 21);
+      ArrayResize(fx_rules, 22);
 
       // ⚠️ EURUSD 為估計值，不是像其他 20 筆一樣回測校準出來的數字——
       // sl_pips 用同為 XXXUSD 報價、波動相近的 GBPUSD/AUDUSD/USDCAD 內插，
       // tp_pips=2×sl_pips、atr_threshold=(2/3)×sl_pips 沿用其餘各列的固定比例，
       // lot_size 依「每筆風險金額≈GBPUSD/AUDUSD/NZDUSD 三者的平均值」反推。
       // 正式交易前請自行用實際回測數據覆蓋這一列。
+      // ⚠️ USDCNH 同樣是估計值：日均波幅約 300~400 pips(0.0001)，依 EURUSD「止損≈日均波幅 28%」
+      // 的比例推得 sl≈100 pips；tp=2×sl、atr_threshold=(2/3)×sl 沿用固定比例；
+      // 1 手每 pip 約 $1.39(=10/7.2)，lot 依每筆風險≈$107(同 EURUSD) 反推。正式交易前請用回測數據覆蓋。
+      fx_rules[21].symbol="USDCNH"; fx_rules[21].sl_pips=100.00; fx_rules[21].tp_pips=200.00; fx_rules[21].atr_threshold=66.67; fx_rules[21].lot_size=0.77;
+
       fx_rules[20].symbol="EURUSD"; fx_rules[20].sl_pips=21.00; fx_rules[20].tp_pips=42.00;  fx_rules[20].atr_threshold=14.00;  fx_rules[20].lot_size=0.51;
 
       fx_rules[0].symbol="AUDJPY";  fx_rules[0].sl_pips=34.41;  fx_rules[0].tp_pips=68.82;   fx_rules[0].atr_threshold=22.94;   fx_rules[0].lot_size=0.49;
@@ -466,16 +687,19 @@ public:
       StepProfitPips = 30;
       StepLockPips = 15;
 
+      ScheduleOffsetHours = 6;
       TradingStartHour = 7;  TradingStartMin = 15;
       NoTradeStartHour = 4;  NoTradeStartMin = 45;
       NoTradeEndHour   = 7;  NoTradeEndMin   = 15;
-      ForceCloseHour   = 5;  ForceCloseMin   = 50;
+      ForceCloseHour   = 5;  ForceCloseMin   = 45;
 
       NoTrade2StartHour = 17; NoTrade2StartMin = 50;
       NoTrade2EndHour   = 18; NoTrade2EndMin   = 10;
 
       lastResetDay     = 0;
       forceClosedToday = false;
+      NewsBlocked      = "";
+      TradingEnabled   = true;
 
       InitRules();
 
@@ -488,8 +712,17 @@ public:
          m_hMACD[i]        = INVALID_HANDLE;
          m_hStoch[i]       = INVALID_HANDLE;
          m_lastBarTimeF[i] = 0;
+         m_symName[i]      = "";
       }
    }
+
+   // 策略週期：F段反向信號、追蹤停損擺動點都用這個週期，需在 InitIndicators 之前呼叫
+   void SetTimeframe(ENUM_TIMEFRAMES tf)
+   {
+      m_tf = (tf == PERIOD_CURRENT) ? (ENUM_TIMEFRAMES)_Period : tf;
+   }
+
+   ENUM_TIMEFRAMES Timeframe() { return m_tf; }
 
    //-----------------------------------------------------------------
    // InitIndicators / DeinitIndicators（供EA OnInit/OnDeinit）
@@ -500,23 +733,27 @@ public:
 
       for(int i=0; i<SYMBOL_COUNT; i++)
       {
-         string sym = SYMBOLS[i];
-
-         // 券商 Market Watch 裡沒勾選的商品先嘗試自動加入，
-         // 加不進去（真的沒這商品）SymbolSelect 會回傳 false，後面 iXxx 也會建 handle 失敗。
-         SymbolSelect(sym, true);
+         // 對應券商實際名稱（含後綴/前綴），並自動加入 Market Watch；
+         // 券商沒有這個商品就整個跳過，不影響其餘商品。
+         string sym = _resolveName(SYMBOLS[i]);
+         m_symName[i] = sym;
+         if(sym == "")
+         {
+            failCount++;
+            continue;
+         }
 
          m_hEmaFast[i] = iMA(sym, m_tf, EMA_FAST, 0, MODE_EMA, PRICE_CLOSE);
          m_hEmaSlow[i] = iMA(sym, m_tf, EMA_SLOW, 0, MODE_EMA, PRICE_CLOSE);
          m_hRSI[i]     = iRSI(sym, m_tf, RSI_PERIOD, PRICE_CLOSE);
 
-         if(sym == "USDJPY")
+         if(SYMBOLS[i] == "USDJPY")
             m_hBB[i] = iBands(sym, m_tf, BB_PERIOD_USDJPY, 0, BB_DEV_USDJPY, PRICE_CLOSE);
          else
             m_hBB[i] = iBands(sym, m_tf, BB_PERIOD_DEFAULT, 0, BB_DEV_DEFAULT, PRICE_CLOSE);
 
          m_hMACD[i]  = iMACD(sym, m_tf, MACD_FAST, MACD_SLOW, MACD_SIG, PRICE_CLOSE);
-         m_hStoch[i] = iStochastic(sym, m_tf, KdjPeriod(sym), KDJ_KD, KDJ_KK, MODE_SMA, STO_LOWHIGH);
+         m_hStoch[i] = iStochastic(sym, m_tf, KdjPeriod(SYMBOLS[i]), KDJ_KD, KDJ_KK, MODE_SMA, STO_LOWHIGH);
 
          if(m_hEmaFast[i] == INVALID_HANDLE || m_hEmaSlow[i] == INVALID_HANDLE ||
             m_hRSI[i]     == INVALID_HANDLE || m_hBB[i]      == INVALID_HANDLE ||
@@ -533,6 +770,7 @@ public:
             if(m_hMACD[i]    != INVALID_HANDLE) { IndicatorRelease(m_hMACD[i]);    m_hMACD[i]    = INVALID_HANDLE; }
             if(m_hStoch[i]   != INVALID_HANDLE) { IndicatorRelease(m_hStoch[i]);   m_hStoch[i]   = INVALID_HANDLE; }
 
+            m_symName[i] = "";
             failCount++;
             continue;
          }
@@ -558,16 +796,93 @@ public:
          if(m_hStoch[i]   != INVALID_HANDLE) { IndicatorRelease(m_hStoch[i]);   m_hStoch[i]   = INVALID_HANDLE; }
       }
 
+      for(int i=0; i<ArraySize(m_atrH); i++)
+         if(m_atrH[i] != INVALID_HANDLE) IndicatorRelease(m_atrH[i]);
+      ArrayResize(m_atrSym, 0);
+      ArrayResize(m_atrH,   0);
+
       Print("FilterLib v5: 所有指標handle已釋放");
    }
 
    //-----------------------------------------------------------------
    // v4 公開方法
    //-----------------------------------------------------------------
+   // 該商品規則的停損/停利距離（價格單位），供 ML 虛擬單標記使用；無規則回傳 false
+   bool GetStopDistances(string sym, double &slDist, double &tpDist)
+   {
+      int idx = FindRule(sym);
+      if(idx < 0) { slDist = 0; tpDist = 0; return false; }
+      double pip = PipSize(sym);
+      slDist = fx_rules[idx].sl_pips * pip;
+      tpDist = fx_rules[idx].tp_pips * pip;
+      return true;
+   }
+
    double GetLotSize(string sym)
    {
       int idx = FindRule(sym);
       return (idx < 0) ? 0.01 : fx_rules[idx].lot_size;
+   }
+
+   //-----------------------------------------------------------------
+   // 市價下單（參考 BeeQuant12 BQ_Trade.mqh）：
+   //  * 依商品設定成交模式 (filling)，避免部分券商直接拒單
+   //  * 手數對齊 volume_step / min / max
+   //  * SL/TP 太近時推到券商最小距離
+   //  * 檢查 retcode（不是只看 bool），遇到重新報價/價格變動自動重試 3 次
+   //-----------------------------------------------------------------
+   double NormalizeLots(string sym, double lots)
+   {
+      double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      double mn   = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      double mx   = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+      if(step <= 0) step = 0.01;
+      lots = MathFloor(lots/step + 1e-7) * step;
+      if(lots < mn) lots = mn;
+      if(mx > 0 && lots > mx) lots = mx;
+      return NormalizeDouble(lots, _volDigits(sym));
+   }
+
+   bool OpenMarket(string sym, int direction, double lots, double sl, double tp, string cmt)
+   {
+      if(!TradingEnabled)
+      {
+         PrintFormat("📝 [只統計] %s %s 不下單", sym, direction > 0 ? "BUY" : "SELL");
+         return false;
+      }
+      bool isBuy = (direction > 0);
+      lots = NormalizeLots(sym, lots);
+
+      double price = isBuy ? SymbolInfoDouble(sym, SYMBOL_ASK) : SymbolInfoDouble(sym, SYMBOL_BID);
+      double margin = 0.0;
+      if(OrderCalcMargin(isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, sym, lots, price, margin) &&
+         margin > AccountInfoDouble(ACCOUNT_MARGIN_FREE))
+      {
+         PrintFormat("❌ [%s] 保證金不足：需要 %.2f 可用 %.2f", sym, margin, AccountInfoDouble(ACCOUNT_MARGIN_FREE));
+         return false;
+      }
+
+      trade.SetTypeFillingBySymbol(sym);
+
+      for(int attempt=0; attempt<3; attempt++)
+      {
+         double s = sl, t = tp;
+         if(isBuy)
+         {
+            _fixStops(sym, true, SymbolInfoDouble(sym, SYMBOL_BID), s, t);
+            trade.Buy(lots, sym, 0.0, s, t, cmt);
+         }
+         else
+         {
+            _fixStops(sym, false, SymbolInfoDouble(sym, SYMBOL_ASK), s, t);
+            trade.Sell(lots, sym, 0.0, s, t, cmt);
+         }
+
+         if(_resultOK(sym, isBuy ? "Buy" : "Sell")) return true;
+         if(!_retryable()) break;
+         Sleep(200);
+      }
+      return false;
    }
 
    bool IsVolatilityNormal(string sym)
@@ -575,20 +890,14 @@ public:
       int idx = FindRule(sym);
       if(idx < 0) return true;
 
-      int h = iATR(sym, PERIOD_M1, 1);
-      if(h == INVALID_HANDLE) return true;
+      // 取不到值（handle 剛建立/歷史未同步）時沿用原本行為：不擋單
+      double atrPips = 0.0;
+      if(!_atrPips(sym, atrPips)) return true;
 
-      double buf[];
-      ArraySetAsSeries(buf, true);
-      bool ok = (CopyBuffer(h, 0, 0, 1, buf) > 0);
-      IndicatorRelease(h);
-      if(!ok) return true;
-
-      double atrPips = buf[0] / PipSize(sym);
       double limit   = fx_rules[idx].atr_threshold * VolatilityMultiplier;
       bool normal    = (atrPips < limit);
 
-      if(!normal)
+      if(!normal && _volMsgDue(sym))
          Print("🚫 ", sym, " ATR=", DoubleToString(atrPips,1), " > ", DoubleToString(limit,1), " pips");
 
       return normal;
@@ -618,7 +927,7 @@ public:
             Print("✅ 啟動時重置完成");
          }
 
-         lastResetDay = TimeLocal();
+         lastResetDay = SchedNow();
          return;
       }
 
@@ -640,7 +949,7 @@ public:
                GlobalVariableDel(key);
          }
 
-         lastResetDay     = TimeLocal();
+         lastResetDay     = SchedNow();
          forceClosedToday = false;
          Print("✅ 每日重置完成");
       }
@@ -648,19 +957,35 @@ public:
 
    void CheckForceClose()
    {
-      if(forceClosedToday) return;
-
       MqlDateTime t = LocalNow();
       int nowMin   = t.hour * 60 + t.min;
       int closeMin = ForceCloseHour * 60 + ForceCloseMin;
+      int startMin = TradingStartHour * 60 + TradingStartMin;
 
-      // 用「分鐘數是否已過強平時間」取代「小時剛好相等」，
-      // 避免錯過該小時內唯一一次 tick 就導致當天永遠不強平
-      if(nowMin >= closeMin)
+      // 強平時段 = 強平時間 ~ 下一個交易日起點（預設 05:45 ~ 07:15）。
+      // 原本只判斷「現在 >= 強平時間」，而 forceClosedToday 要到 07:15 換日才重置：
+      // 結果是 07:15 一換日就把倉位全平，隔天 05:45 反而因旗標未重置而不平；
+      // EA 白天啟動時也會立刻全平。改成只在強平時段內動作，平不完就持續重試。
+      bool inWin = (closeMin <= startMin) ? (nowMin >= closeMin && nowMin < startMin)
+                                          : (nowMin >= closeMin || nowMin < startMin);
+      if(!inWin)
       {
-         CloseAll("05:50強平");
-         forceClosedToday = true;
+         forceClosedToday = false;
+         return;
       }
+      if(forceClosedToday) return;
+
+      // 休市時平倉會失敗：每分鐘最多重試一次，避免洗版
+      static datetime lastTry = 0;
+      if(TimeLocal() - lastTry < 60) return;
+      lastTry = TimeLocal();
+
+      CloseAll(StringFormat("%02d:%02d強平", ForceCloseHour, ForceCloseMin));
+
+      bool left = false;
+      for(int i=PositionsTotal()-1; i>=0; i--)
+         if(pos.SelectByIndex(i) && pos.Magic() == magic) { left = true; break; }
+      forceClosedToday = !left;
    }
 
    bool IsInNoTradeWindow()
@@ -691,10 +1016,10 @@ public:
       ArraySetAsSeries(closeBuf, true);
 
       int bars = 30;
-      int gotHigh  = CopyHigh(sym, PERIOD_M12, 1, bars, highBuf);
-      int gotLow   = CopyLow(sym, PERIOD_M12, 1, bars, lowBuf);
-      int gotOpen  = CopyOpen(sym, PERIOD_M12, 1, bars, openBuf);
-      int gotClose = CopyClose(sym, PERIOD_M12, 1, bars, closeBuf);
+      int gotHigh  = CopyHigh(sym, m_tf, 1, bars, highBuf);
+      int gotLow   = CopyLow(sym, m_tf, 1, bars, lowBuf);
+      int gotOpen  = CopyOpen(sym, m_tf, 1, bars, openBuf);
+      int gotClose = CopyClose(sym, m_tf, 1, bars, closeBuf);
 
       // 剛訂閱/歷史資料尚未補齊時，Copy* 可能回傳少於 bars 根，
       // 迴圈只能掃到實際回傳的最小根數，避免陣列越界
@@ -756,6 +1081,8 @@ public:
 
    void MonitorPositions()
    {
+      if(!TradingEnabled) return;   // 只統計模式：不動任何持倉
+
       CheckDailyReset();
       CheckForceClose();
 
@@ -785,7 +1112,7 @@ public:
          double curTP  = pos.TakeProfit();
          double point  = SymbolInfoDouble(sym, SYMBOL_POINT);
          int    digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
-         int    sidx   = SymIdx(sym);
+         int    sidx   = _idxOf(sym);
 
          if(IsSymbolLocked(sym)) continue;
 
@@ -795,6 +1122,10 @@ public:
             LockSymbol(sym);
             continue;
          }
+
+         // 新聞時段：不做主動平倉（ATR異常平倉、反向信號平倉）也不收緊追蹤停損，
+         // 避免在 FTMO 禁止成交的新聞前後產生成交；淨值/每日虧損的風控平倉不受影響
+         if(IsNewsBlocked(sym)) continue;
 
          if(!IsVolatilityNormal(sym))
          {
@@ -806,8 +1137,17 @@ public:
          double newSL = CalcTrailingStop(sym, dir, entry, curSL);
          if(MathAbs(newSL - curSL) > point * 2)
          {
-            trade.PositionModify(ticket, NormalizeDouble(newSL, digits), curTP);
-            Print("📐 SL ", sym, " ", DoubleToString(curSL,5), " -> ", DoubleToString(newSL,5), " [追蹤]");
+            // 新SL離現價太近會被券商拒絕（STOPS_LEVEL/FREEZE_LEVEL），這種情況本次先不改
+            double minD = _minStopDist(sym) + point;
+            bool tooClose = (dir == 1) ? (SymbolInfoDouble(sym, SYMBOL_BID) - newSL < minD)
+                                       : (newSL - SymbolInfoDouble(sym, SYMBOL_ASK) < minD);
+            if(!tooClose)
+            {
+               newSL = _normPrice(sym, newSL);
+               trade.PositionModify(ticket, newSL, curTP);
+               if(_resultOK(sym, "改SL"))
+                  Print("📐 SL ", sym, " ", DoubleToString(curSL,digits), " -> ", DoubleToString(newSL,digits), " [追蹤]");
+            }
          }
 
          if(sidx >= 0 && _checkNewBarF(sidx))
@@ -816,7 +1156,7 @@ public:
             if((dir == 1 && sig == SIG_SELL) || (dir == -1 && sig == SIG_BUY))
             {
                Print("🔄 [F] 反向信號 ", sym, " ticket=", ticket, " → 主動平倉");
-               trade.PositionClose(ticket);
+               _closeTicket(ticket, sym);
             }
          }
       }
@@ -872,15 +1212,7 @@ public:
 
       if(idx >= 0)
       {
-         int h = iATR(sym, PERIOD_M1, 1);
-         if(h != INVALID_HANDLE)
-         {
-            double buf[];
-            ArraySetAsSeries(buf, true);
-            if(CopyBuffer(h, 0, 0, 1, buf) > 0)
-               atrPips = buf[0] / PipSize(sym);
-            IndicatorRelease(h);
-         }
+         _atrPips(sym, atrPips);
 
          atrLimit = fx_rules[idx].atr_threshold * VolatilityMultiplier;
       }
@@ -907,7 +1239,7 @@ public:
       string w2 = StringFormat("%02d:%02d~%02d:%02d", NoTrade2StartHour, NoTrade2StartMin, NoTrade2EndHour, NoTrade2EndMin);
 
       string r = "━━━━━━━━━━━━━━━━━━━━━━━━\n";
-      r += StringFormat("⏰ %02d:%02d:%02d  淨值:$%.2f(警戒$%.0f)\n",
+      r += StringFormat("⏰ 排程 %02d:%02d:%02d  淨值:$%.2f(警戒$%.0f)\n",
                         t.hour, t.min, t.sec,
                         AccountInfoDouble(ACCOUNT_EQUITY), AccountEquityFloor);
       r += StringFormat("📊 總PnL:$%.2f(限$%.0f)\n", GetTotalDayPnL(), DayLossLimit);
