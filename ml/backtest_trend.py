@@ -397,6 +397,66 @@ def line(name, s):
 HEAD = f"{'':<14} {'筆數':>5} {'勝率':>7} {'平均R':>7} {'總R':>8} {'PF':>6} {'最大回撤R':>7} {'帳戶報酬':>9}"
 
 
+#--------------------------------------------------------------------- 參數網格
+GRID_MIN_SCORE = (5, 6, 7)
+GRID_ADX = (20, 25, 30)
+GRID_MA = {"5/10/20/34": (5, 10, 20, 34), "10/20/50/100": (10, 20, 50, 100)}
+GRID_TRAIL = ("atr", "swing")
+
+
+def run_grid(a, syms, h1dir, h4dir):
+    if not a.split:
+        sys.exit("--grid 需要 --split（例如 --split 2023-01-01）來分樣本內/外")
+    cut = dt.datetime.strptime(a.split, "%Y-%m-%d")
+    data = []
+    for sym in syms:
+        try:
+            h1, digits = load_bars(os.path.join(h1dir, sym + ".csv"))
+            h4, _ = load_bars(os.path.join(h4dir, sym + ".csv"))
+        except (OSError, ValueError):
+            continue
+        if len(h1["t"]) >= 500 and len(h4["t"]) >= 100:
+            data.append((sym, h1, h4, 10 ** -digits, h1["t"][-1] - dt.timedelta(days=365 * a.years)))
+    combos = [(ms, ax, mk, tr) for ms in GRID_MIN_SCORE for ax in GRID_ADX for mk in GRID_MA for tr in GRID_TRAIL]
+    print(f"網格：{len(data)} 個商品 × {len(combos)} 組參數，分界 {a.split}")
+    rows = []
+    for ci, (ms, ax, mk, tr) in enumerate(combos, 1):
+        P = dict(DEFAULT_PARAMS)
+        P.update(min_score=ms, adx_min=ax)
+        P["ma1"], P["ma2"], P["ma3"], P["ma4"] = GRID_MA[mk]
+        ins, oos, per = [], [], defaultdict(lambda: [0.0, 0.0])
+        for sym, h1, h4, point, start in data:
+            for t in backtest_symbol(sym, h1, h4, P, point, tr, a.units, start):
+                (ins if t["open"] < cut else oos).append(t["r"])
+                per[sym][0 if t["open"] < cut else 1] += t["r"]
+        si, so = stats(ins), stats(oos)
+        both = sorted(x for x, (ri, ro) in per.items() if ri > 0 and ro > 0)
+        rows.append((ms, ax, mk, tr, si, so, both))
+        print(f"[{ci:2d}/{len(combos)}] score>={ms} adx>={ax} MA {mk:<12} {tr:<5} "
+              f"內 {si['n']:5d}筆 {si['total']:+8.1f}R PF{si['pf']:.2f} | 外 {so['n']:5d}筆 {so['total']:+8.1f}R PF{so['pf']:.2f}")
+
+    def key(r):
+        pi = r[4]["pf"] if r[4]["n"] else 0
+        po = r[5]["pf"] if r[5]["n"] else 0
+        return min(pi, po)
+    rows.sort(key=key, reverse=True)
+    print("\n" + "=" * 100)
+    print("依「樣本內、樣本外 PF 較差的那個」排序（兩段都 > 1 才算可能有優勢）")
+    print("=" * 100)
+    for ms, ax, mk, tr, si, so, both in rows[:10]:
+        print(f"score>={ms} adx>={ax} MA {mk:<12} {tr:<5}  內 PF{si['pf']:.2f} {si['total']:+7.1f}R ({si['n']}筆) | "
+              f"外 PF{so['pf']:.2f} {so['total']:+7.1f}R ({so['n']}筆)")
+        print(f"    兩段都賺的商品（{len(both)}）：{' '.join(both)}")
+    out = a.out.replace(".csv", "_grid.csv")
+    with open(out, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["min_score", "adx_min", "ma", "trail", "is_n", "is_R", "is_pf", "oos_n", "oos_R", "oos_pf", "both_positive"])
+        for ms, ax, mk, tr, si, so, both in rows:
+            w.writerow([ms, ax, mk, tr, si["n"], round(si["total"], 1), round(si["pf"], 2),
+                        so["n"], round(so["total"], 1), round(so["pf"], 2), " ".join(both)])
+    print(f"\n網格結果：{os.path.abspath(out)}")
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")   # 導到檔案時用 UTF-8，避免亂碼
@@ -412,6 +472,9 @@ def main():
     ap.add_argument("--units", type=int, default=3)
     ap.add_argument("--split", default="", help="樣本內/外分界日 YYYY-MM-DD")
     ap.add_argument("--out", default="backtest_trend_trades.csv")
+    ap.add_argument("--group", default="", help="只測這些分組，例如 crypto 或 major,cross")
+    ap.add_argument("--grid", action="store_true",
+                    help="參數網格：min_score×adx_min×均線組×移動止損，報告樣本內/外（需 --split）")
     a = ap.parse_args()
 
     h1dir, h4dir = os.path.join(a.data, "H1"), os.path.join(a.data, "H4")
@@ -419,6 +482,13 @@ def main():
         sys.exit(f"找不到 {h1dir} 或 {h4dir}（先用 HistoryExporter 匯出 H1、H4）")
     syms = [s.strip() for s in a.symbols.split(",") if s.strip()] or \
         sorted(f[:-4] for f in os.listdir(h1dir) if f.endswith(".csv") and os.path.exists(os.path.join(h4dir, f)))
+    if a.group:
+        want = {g.strip() for g in a.group.split(",") if g.strip()}
+        syms = [x for x in syms if symbol_group(x) in want]
+        print(f"分組 {a.group}：{len(syms)} 個商品")
+    if a.grid:
+        run_grid(a, syms, h1dir, h4dir)
+        return
     per_sym_params = load_params(a.params)
     if per_sym_params:
         print(f"使用 params.csv：{len(per_sym_params)} 個商品的個別參數")
