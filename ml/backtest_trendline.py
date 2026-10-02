@@ -158,6 +158,7 @@ def main():
     ap.add_argument("--pivot", type=int, default=5)
     ap.add_argument("--rr", type=float, default=2.0)
     ap.add_argument("--max-hold", type=int, default=100, help="最多持有幾根 K 棒")
+    ap.add_argument("--min-trades", type=int, default=30, help="判定「兩段都賺」時樣本內最少筆數（樣本外取一半）")
     ap.add_argument("--grid", action="store_true", help="跑全部 擺動N × 模式 × RR 組合")
     ap.add_argument("--out", default="trendline.csv")
     a = ap.parse_args()
@@ -196,7 +197,7 @@ def main():
             ph, pl = piv_cache[(s, n)]
             for t0, r, why in run(s, b, at, ph, pl, n, mode, rr, point, si, a.max_hold):
                 allr.append(r)
-                per[s].append(r)
+                per[s].append((t0, r))
                 grp[symbol_group(s)].append(r)
                 if cut:
                     (ins if t0 < cut else oos).append(r)
@@ -225,14 +226,40 @@ def main():
             x = stats(grp[g])
             print(f"  {GROUP_NAMES[g]:<6} {x['n']:5d}筆 勝率{x['win']:5.1f}% {x['total']:+8.1f}R PF{x['pf']:.2f}")
     print("— 依商品（前 15 / 後 5）—")
-    ranked = sorted(per.items(), key=lambda kv: -sum(kv[1]))
+    ranked = sorted(per.items(), key=lambda kv: -sum(r for _, r in kv[1]))
     show = ranked if len(ranked) <= 20 else ranked[:15] + [("...", [])] + ranked[-5:]
     for s, rs in show:
         if not rs:
             print("  ...")
             continue
-        x = stats(rs)
+        x = stats([r for _, r in rs])
         print(f"  {s:<12} {x['n']:4d}筆 勝率{x['win']:5.1f}% {x['total']:+7.1f}R PF{x['pf']:.2f}")
+
+    if cut:
+        # 每個商品分開看樣本內 / 外：兩段都賺（PF>1 且筆數夠）才算可能真的有優勢
+        rows = []
+        for s, rs in per.items():
+            xi = stats([r for t0, r in rs if t0 < cut])
+            xo = stats([r for t0, r in rs if t0 >= cut])
+            rows.append((s, xi, xo))
+        good = [x for x in rows if x[1]["n"] >= a.min_trades and x[2]["n"] >= a.min_trades // 2
+                and x[1]["pf"] > 1.0 and x[2]["pf"] > 1.0]
+        good.sort(key=lambda x: -min(x[1]["pf"], x[2]["pf"]))
+        print(f"\n— 樣本內、樣本外都賺的商品（內≥{a.min_trades}筆、外≥{a.min_trades // 2}筆）：{len(good)} / {len(rows)} 個 —")
+        for s, xi, xo in good:
+            print(f"  ✅ {s:<12} 內 {xi['n']:4d}筆 PF{xi['pf']:.2f} {xi['total']:+6.1f}R | 外 {xo['n']:4d}筆 PF{xo['pf']:.2f} {xo['total']:+6.1f}R")
+        exp = sum(1 for _, xi, _ in rows if xi["n"] >= a.min_trades and xi["pf"] > 1) * \
+            sum(1 for _, _, xo in rows if xo["n"] >= a.min_trades // 2 and xo["pf"] > 1) / max(len(rows), 1)
+        print(f"  （參考：如果樣本內外完全無關，純靠運氣預期約 {exp:.0f} 個商品會兩段都賺；實際 {len(good)} 個）")
+        per_out = a.out.replace(".csv", "_symbols.csv")
+        with open(per_out, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["symbol", "group", "is_n", "is_R", "is_pf", "oos_n", "oos_R", "oos_pf", "both_positive"])
+            for s, xi, xo in sorted(rows, key=lambda x: -min(x[1]["pf"], x[2]["pf"])):
+                w.writerow([s, symbol_group(s), xi["n"], round(xi["total"], 1), round(xi["pf"], 2),
+                            xo["n"], round(xo["total"], 1), round(xo["pf"], 2),
+                            "Y" if (s, xi, xo) in good else ""])
+        print(f"  各商品明細：{os.path.abspath(per_out)}")
 
     with open(a.out, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)

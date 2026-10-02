@@ -576,6 +576,22 @@ def main():
     for sym, rs in sorted(by.items(), key=lambda kv: -sum(kv[1])):
         print(line(sym, stats(rs)))
 
+    if a.split:
+        cut = dt.datetime.strptime(a.split, "%Y-%m-%d")
+        by_i, by_o = defaultdict(list), defaultdict(list)
+        for t in all_trades:
+            (by_i if t["open"] < cut else by_o)[t["symbol"]].append(t["r"])
+        good = []
+        for sym in sorted(set(by_i) | set(by_o)):
+            xi, xo = stats(by_i[sym]), stats(by_o[sym])
+            if xi["n"] >= 30 and xo["n"] >= 15 and xi["pf"] > 1 and xo["pf"] > 1:
+                good.append((sym, xi, xo))
+        good.sort(key=lambda x: -min(x[1]["pf"], x[2]["pf"]))
+        print(f"\n— 樣本內、樣本外都賺的商品（內≥30筆、外≥15筆）：{len(good)} 個 —")
+        for sym, xi, xo in good:
+            print(f"  ✅ {sym:<12} 內 {xi['n']:4d}筆 PF{xi['pf']:.2f} {xi['total']:+6.1f}R | 外 {xo['n']:4d}筆 PF{xo['pf']:.2f} {xo['total']:+6.1f}R")
+        print("  清單可直接貼到 TrendScanner 的 InpSymbols：" + ",".join(x[0] for x in good))
+
     print(f"\n逐筆交易：{os.path.abspath(a.out)}")
     print("注意：H1 近似模擬，未含滑價與隔夜費；未限制同時持倉數；結果用來比較規則與參數，不代表實盤績效。")
 
