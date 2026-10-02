@@ -117,3 +117,13 @@ python ml/backtest_trend.py --symbols EURUSD,XAUUSD --trail swing --units 1
 
 把 HistoryExporter 的資料轉成 Gordon 的 `merged\<商品>_<週期>_MERGED_ALL_DATA.csv`（日期,開,高,低,收,成交量）
 與 `_last_bar_state.csv`，`update_all_data.py` 與儀表板不用改。只附加新K棒；`ftmo_sync.ps1` 每天自動執行，並接著跑 `update_all_data.py`。
+
+## ListSymbols.mq5 — 券商全部商品明細（腳本，只讀）
+
+拖到 FTMO MT5 任一圖表執行 → `Common\Files\FTMO_Data\symbols_list.csv`：商品、分組、說明、券商資料夾、小數位、合約大小、
+每點價值、手數限制、點差、隔夜費、交易模式、是否在 HistoryExporter 匯出範圍。
+
+## tools/Gordon_Module1_VBA.txt — Gordon 活頁簿 Module1 新版
+
+取代舊 Module1：不再用 Python 登入真實帳戶逐筆匯出，改為「ftmo_to_gordon.py 轉換 → update_all_data.py → 刷新儀表板」；
+「市場清單」的勾選仍有效；統一路徑為 `D:\整合計畫\整理後\ExportCSV\merged`。
