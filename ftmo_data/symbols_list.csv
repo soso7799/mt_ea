@@ -1,0 +1,167 @@
+﻿symbol,group,group_name,description,path,digits,contract_size,tick_value,min_lot,max_lot,lot_step,spread_points,swap_long,swap_short,trade_mode,exported
+EURUSD,major,主要貨幣,Euro vs United States Dollar,Forex\EURUSD,5,100000.0,1.0,0.01,50.0,0.01,0,-10.33,0.37,可交易,Y
+GBPUSD,major,主要貨幣,Great Britain Pound vs US Dollar,Forex\GBPUSD,5,100000.0,1.0,0.01,50.0,0.01,3,-5.44,-4.31,可交易,Y
+USDCHF,major,主要貨幣,US Dollar vs Swiss Franc,Forex\USDCHF,5,100000.0,1.2019519699992787,0.01,50.0,0.01,4,2.05,-13.85,可交易,Y
+USDJPY,major,主要貨幣,US Dollar vs Japanese Yen,Forex\USDJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,3,2.56,-17.42,可交易,Y
+USDCAD,major,主要貨幣,US Dollar vs Canadian Dollar,Forex\USDCAD,5,100000.0,0.7026567451534252,0.01,50.0,0.01,7,0.91,-11.77,可交易,Y
+AUDUSD,major,主要貨幣,Australian Dollar vs US Dollar,Forex\AUDUSD,5,100000.0,1.0,0.01,50.0,0.01,4,-2.7,-6.49,可交易,Y
+AUDNZD,cross,交叉貨幣,Australian Dollar vs New Zealand Dollar,Forex\AUDNZD,5,100000.0,0.0,0.01,50.0,0.01,20,2.05,-10.3,可交易,Y
+AUDCAD,cross,交叉貨幣,Australian Dollar vs Canadian Dollar,Forex\AUDCAD,5,100000.0,0.7026567451534252,0.01,50.0,0.01,14,1.4,-10.18,可交易,Y
+AUDCHF,cross,交叉貨幣,Australian Dollar vs Swiss Franc,Forex\AUDCHF,5,100000.0,1.2019519699992787,0.01,50.0,0.01,7,2.43,-11.45,可交易,Y
+AUDJPY,cross,交叉貨幣,Australian Dollar vs Japanese Yen,Forex\AUDJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,12,2.65,-14.49,可交易,Y
+CHFJPY,cross,交叉貨幣,Swiss Franc vs Japanese Yen,Forex\CHFJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,0,-13.13,1.87,可交易,Y
+EURGBP,cross,交叉貨幣,Euro vs Great Britain Pound,Forex\EURGBP,5,100000.0,1.3185100000000003,0.01,50.0,0.01,0,-7.6,0.01,可交易,Y
+EURAUD,cross,交叉貨幣,Euro vs Australian Dollar,Forex\EURAUD,5,100000.0,0.6917400000000001,0.01,50.0,0.01,0,-16.43,3.18,可交易,Y
+EURCHF,cross,交叉貨幣,Euro vs Swiss Franc,Forex\EURCHF,5,100000.0,1.2019519699992787,0.01,50.0,0.01,0,1.17,-11.46,可交易,Y
+EURJPY,cross,交叉貨幣,Euro vs Japanese Yen,Forex\EURJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,0,1.2,-9.99,可交易,Y
+EURNZD,cross,交叉貨幣,Euro vs New Zealand Dollar,Forex\EURNZD,5,100000.0,0.0,0.01,50.0,0.01,0,-6.47,-2.44,可交易,Y
+EURCAD,cross,交叉貨幣,Euro vs Canadian Dollar,Forex\EURCAD,5,100000.0,0.7026567451534252,0.01,50.0,0.01,0,-2.26,-4.64,可交易,Y
+GBPCHF,cross,交叉貨幣,Great Britain Pound vs Swiss Franc,Forex\GBPCHF,5,100000.0,1.2019519699992787,0.01,50.0,0.01,0,2.51,-21.76,可交易,Y
+GBPJPY,cross,交叉貨幣,Great Britain Pound vs Japanese Yen,Forex\GBPJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,0,3.08,-23.4,可交易,Y
+CADCHF,cross,交叉貨幣,Canadian Dollar vs Swiss Franc,Forex\CADCHF,5,100000.0,1.2019519699992787,0.01,50.0,0.01,0,0.86,-7.57,可交易,Y
+CADJPY,cross,交叉貨幣,Canadian Dollar vs Japanese Yen,Forex\CADJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,0,0.45,-6.4,可交易,Y
+GBPAUD,cross,交叉貨幣,Great Britain Pound vs Australian Dollar,Forex\GBPAUD,5,100000.0,0.6917400000000001,0.01,50.0,0.01,0,-12.55,-1.29,可交易,Y
+GBPCAD,cross,交叉貨幣,Great Britain Pound vs Canadian Dollar,Forex\GBPCAD,5,100000.0,0.7026567451534252,0.01,50.0,0.01,0,0.76,-16.03,可交易,Y
+GBPNZD,cross,交叉貨幣,Great Britain Pound vs New Zealand Dollar,Forex\GBPNZD,5,100000.0,0.0,0.01,50.0,0.01,0,0.02,-15.31,可交易,Y
+NZDCAD,cross,交叉貨幣,New Zealand Dollar vs Canadian Dollar,Forex\NZDCAD,5,100000.0,0.7026567451534252,0.01,50.0,0.01,0,-0.71,-3.24,可交易,Y
+NZDCHF,cross,交叉貨幣,New Zealand Dollar vs Swiss Franc,Forex\NZDCHF,5,100000.0,1.2019519699992787,0.01,50.0,0.01,0,0.92,-6.04,可交易,Y
+NZDJPY,cross,交叉貨幣,New Zealand Dollar vs Japanese Yen,Forex\NZDJPY,3,100000.0,0.6321911746112024,0.01,50.0,0.01,0,0.72,-5.93,可交易,Y
+NZDUSD,major,主要貨幣,New Zealand Dollar vs US Dollar,Forex\NZDUSD,5,100000.0,1.0,0.01,50.0,0.01,0,-4.62,-0.17,可交易,Y
+EURCZK,exotic,異國貨幣,Euro vs Czech Republic Koruna,Exotics\EURCZK,4,100000.0,0.0,0.01,50.0,0.01,0,-20.3,-1.23,可交易,Y
+EURHUF,exotic,異國貨幣,Euro vs Hungarian Forint,Exotics\EURHUF,3,100000.0,0.0,0.01,50.0,0.01,0,-46.34,11.14,可交易,Y
+EURNOK,exotic,異國貨幣,Euro vs Norwegian Krone,Exotics\EURNOK,5,100000.0,0.0,0.01,50.0,0.01,0,-105.26,21.25,可交易,Y
+EURPLN,exotic,異國貨幣,Euro vs Polish Zloty,Exotics\EURPLN,5,100000.0,0.0,0.01,50.0,0.01,0,-27.78,1.99,可交易,Y
+USDCZK,exotic,異國貨幣,US Dollar vs Czech Republic Koruna,Exotics\USDCZK,4,100000.0,0.0,0.01,50.0,0.01,0,-6.49,-10.74,可交易,Y
+USDHKD,exotic,異國貨幣,US Dollar vs Hong Kong Dollar,Exotics\USDHKD,5,100000.0,0.0,0.01,50.0,0.01,0,2.99,-47.34,可交易,Y
+USDHUF,exotic,異國貨幣,US Dollar vs Hungarian Forint,Exotics\USDHUF,3,100000.0,0.0,0.01,50.0,0.01,0,-23.92,3.29,可交易,Y
+USDILS,exotic,異國貨幣,US Dollar vs Israeli New Sheqel,Exotics\USDILS,5,100000.0,0.0,0.01,50.0,0.01,0,1.15,-20.89,可交易,Y
+USDMXN,exotic,異國貨幣,US Dollar vs Mexican Peso,Exotics\USDMXN,5,100000.0,0.0,0.01,50.0,0.01,0,-283.33,14.69,可交易,Y
+USDNOK,exotic,異國貨幣,US Dollar vs Norwegian Krone,Exotics\USDNOK,5,100000.0,0.0,0.01,50.0,0.01,0,-42.28,-1.6,可交易,Y
+USDPLN,exotic,異國貨幣,US Dollar vs Polish Zloty,Exotics\USDPLN,5,100000.0,0.0,0.01,50.0,0.01,0,-4.05,-13.29,可交易,Y
+USDSEK,exotic,異國貨幣,US Dollar vs Swedish Krona,Exotics\USDSEK,5,100000.0,0.0,0.01,50.0,0.01,0,13.34,-89.61,可交易,Y
+USDZAR,exotic,異國貨幣,US Dollar vs South African Rand,Exotics\USDZAR,5,100000.0,0.0,0.01,50.0,0.01,0,-234.05,22.0,可交易,Y
+USDSGD,exotic,異國貨幣,US Dollar vs Singapore Dollar,Exotics\USDSGD,5,100000.0,0.0,0.01,50.0,0.01,0,1.19,-13.54,可交易,Y
+USDCNH,exotic,異國貨幣,US Dollar vs Chinese Yuan,Exotics\USDCNH,5,100000.0,0.0,0.01,50.0,0.01,0,8.04,-75.02,可交易,Y
+GER40.cash,index,指數,German 40 Index  Spot CFD,Cash CFD\GER40.cash,2,1.0,0.0112352,0.01,1000.0,0.01,0,-448.78,-4.53,可交易,Y
+UK100.cash,index,指數,FTSE 100 Index  Spot CFD,Cash CFD\UK100.cash,2,1.0,0.013185100000000002,0.01,1000.0,0.01,0,-238.89,11.03,可交易,Y
+US100.cash,index,指數,NASDAQ 100 Index  Spot CFD,Cash CFD\US100.cash,2,1.0,0.01,0.01,1000.0,0.01,0,-471.69,-187.48,可交易,Y
+US30.cash,index,指數,Dow Jones Industrial Average Index  Spot CFD,Cash CFD\US30.cash,2,1.0,0.01,0.01,1000.0,0.01,0,-912.48,-190.97,可交易,Y
+US500.cash,index,指數,S&P 500 Index  Spot CFD,Cash CFD\US500.cash,2,1.0,0.01,0.01,1000.0,0.01,0,-105.36,-60.52,可交易,Y
+AUS200.cash,index,指數,Australia 200 Index  Spot CFD,Cash II CFD\AUS200.cash,2,1.0,0.006917400000000001,0.01,1000.0,0.01,0,-190.71,-16.53,可交易,Y
+EU50.cash,index,指數,Euro Stoxx 50 Index  Spot CFD,Cash II CFD\EU50.cash,2,1.0,0.0112352,0.01,1000.0,0.01,0,-111.63,-1.13,可交易,Y
+FRA40.cash,index,指數,France 40 Index  Spot CFD,Cash II CFD\FRA40.cash,2,1.0,0.0112352,0.01,1000.0,0.01,0,-141.8,-1.43,可交易,Y
+HK50.cash,index,指數,Hong Kong Index  Spot CFD,Cash II CFD\HK50.cash,2,1.0,0.0,0.01,1000.0,0.01,0,-478.71,10.04,可交易,Y
+JP225.cash,index,指數,Japan 225 Index  Spot CFD,Cash II CFD\JP225.cash,2,10.0,0.0006321911746112024,0.01,1000.0,0.01,0,-906.33,-302.11,可交易,Y
+N25.cash,index,指數,Netherlands 25 Index  Spot CFD,Cash II CFD\N25.cash,2,1.0,0.0112352,0.01,1000.0,0.01,0,-10.7,1.13,可交易,Y
+SPN35.cash,index,指數,Spain 35 Index  Spot CFD,Cash II CFD\SPN35.cash,2,1.0,0.0112352,0.01,1000.0,0.01,0,-347.04,-3.51,可交易,Y
+US2000.cash,index,指數,Russell 2000 Index  Spot CFD,Cash II CFD\US2000.cash,2,1.0,0.01,0.01,1000.0,0.01,0,-50.34,-10.22,可交易,Y
+UKOIL.cash,energy,能源,Crude Oil Brent  Spot CFD,Cash II CFD\UKOIL.cash,3,100.0,0.1,0.01,1000.0,0.01,0,61.03,-275.55,可交易,Y
+USOIL.cash,energy,能源,West Texas Intermediate Crude Oil  Spot CFD,Cash II CFD\USOIL.cash,3,100.0,0.1,0.01,1000.0,0.01,0,49.69,-225.27,可交易,Y
+XAUUSD,metal,金屬,Gold vs US Dollar  Spot CFD,Metals CFD\XAUUSD,2,100.0,1.0,0.01,100.0,0.01,0,-72.64,-4.2,可交易,Y
+XAUAUD,metal,金屬,Gold vs Australian Dollar  Spot CFD,Metals CFD\XAUAUD,2,100.0,0.69174,0.01,100.0,0.01,0,-108.57,-10.3,可交易,Y
+XAUEUR,metal,金屬,Gold vs Euro  Spot CFD,Metals CFD\XAUEUR,2,100.0,1.12352,0.01,100.0,0.01,0,-41.54,-3.22,可交易,Y
+XAGAUD,metal,金屬,Silver vs Australian Dollar  Spot CFD,Metals CFD\XAGAUD,3,5000.0,3.4587000000000003,0.01,100.0,0.01,0,-15.67,5.55,可交易,Y
+XAGEUR,metal,金屬,Silver vs Euro  Spot CFD,Metals CFD\XAGEUR,3,5000.0,5.6176,0.01,100.0,0.01,0,-5.32,1.11,可交易,Y
+XAGUSD,metal,金屬,Silver vs US Dollar  Spot CFD,Metals CFD\XAGUSD,3,5000.0,5.0,0.01,100.0,0.01,0,-14.68,0.38,可交易,Y
+XPDUSD,metal,金屬,Palladium vs United States Dollar  Spot CFD,Metals CFD\XPDUSD,2,100.0,1.0,0.01,100.0,0.01,0,-41.69,-18.13,可交易,Y
+XPTUSD,metal,金屬,Platinum vs United States Dollar  Spot CFD,Metals CFD\XPTUSD,2,100.0,1.0,0.01,100.0,0.01,0,-54.6,-22.3,可交易,Y
+XCUUSD,metal,金屬,Copper vs US Dollar  Spot CFD,Metals CFD\XCUUSD,2,100.0,1.0,0.01,100.0,0.01,0,-18.04,2.55,可交易,Y
+AAPL,other,其他,Apple  Spot CFD,Equities I CFD\AAPL,2,1.0,0.01,1.0,10000.0,1.0,0,-7.55,-5.97,可交易,
+AMZN,other,其他,Amazon Com  Spot CFD,Equities I CFD\AMZN,2,1.0,0.01,1.0,10000.0,1.0,0,-5.65,-4.47,可交易,
+BABA,other,其他,Alibaba Group  Spot CFD,Equities I CFD\BABA,2,1.0,0.01,1.0,10000.0,1.0,0,-2.46,-1.95,可交易,
+BAC,other,其他,Bank of America  Spot CFD,Equities I CFD\BAC,2,1.0,0.01,1.0,10000.0,1.0,0,-1.26,-1.0,可交易,
+GOOG,other,其他,Alphabet Class C  Spot CFD,Equities I CFD\GOOG,2,1.0,0.01,1.0,10000.0,1.0,0,-7.73,-6.11,可交易,
+MSFT,other,其他,Microsoft  Spot CFD,Equities I CFD\MSFT,2,1.0,0.01,1.0,10000.0,1.0,0,-11.63,-9.2,可交易,
+NFLX,other,其他,Netflix  Spot CFD,Equities I CFD\NFLX,2,1.0,0.01,1.0,10000.0,1.0,0,-1.61,-1.27,可交易,
+NVDA,other,其他,NVIDIA  Spot CFD,Equities I CFD\NVDA,2,1.0,0.01,1.0,10000.0,1.0,0,-5.21,-4.12,可交易,
+PFE,other,其他,Pfizer  Spot CFD,Equities I CFD\PFE,2,1.0,0.01,1.0,10000.0,1.0,0,-0.66,-0.52,可交易,
+RACE,other,其他,Ferrari  Spot CFD,Equities I CFD\RACE,2,1.0,0.01,1.0,10000.0,1.0,0,-9.19,-7.26,可交易,
+T,other,其他,AT&T  Spot CFD,Equities I CFD\T,2,1.0,0.01,1.0,10000.0,1.0,0,-0.56,-0.44,可交易,
+TSLA,other,其他,Tesla  Spot CFD,Equities I CFD\TSLA,2,1.0,0.01,1.0,10000.0,1.0,0,-8.09,-6.4,可交易,
+V,other,其他,Visa  Spot CFD,Equities I CFD\V,2,1.0,0.01,1.0,10000.0,1.0,0,-8.39,-6.63,可交易,
+WMT,other,其他,Walmart  Spot CFD,Equities I CFD\WMT,2,1.0,0.01,1.0,10000.0,1.0,0,-2.45,-1.94,可交易,
+ZM,other,其他,Zoom Video Communications  Spot CFD,Equities I CFD\ZM,2,1.0,0.01,1.0,10000.0,1.0,0,-2.02,-1.6,可交易,
+META,other,其他,Meta Platforms  Spot CFD,Equities I CFD\META,2,1.0,0.01,1.0,10000.0,1.0,0,-16.93,-13.39,可交易,
+GE,other,其他,General Aerospace  Spot CFD,Equities I CFD\GE,2,1.0,0.01,1.0,10000.0,1.0,0,-7.29,-5.76,可交易,
+BA,other,其他,Boeing Co  Spot CFD,Equities I CFD\BA,2,1.0,0.01,1.0,10000.0,1.0,0,-4.3,-3.4,可交易,
+RTX,other,其他,Raytheon Technologies  Spot CFD,Equities I CFD\RTX,2,1.0,0.01,1.0,10000.0,1.0,0,-4.28,-3.39,可交易,
+LMT,other,其他,Lockheed Martin  Spot CFD,Equities I CFD\LMT,2,1.0,0.01,1.0,10000.0,1.0,0,-11.74,-9.28,可交易,
+PLTR,other,其他,Palantir Technologies  Spot CFD,Equities I CFD\PLTR,2,1.0,0.01,1.0,10000.0,1.0,0,-4.28,-3.39,可交易,
+AMD,other,其他,Advanced Micro Devices  Spot CFD,Equities I CFD\AMD,2,1.0,0.01,1.0,10000.0,1.0,0,-13.91,-11.0,可交易,
+INTC,other,其他,Intel Corp  Spot CFD,Equities I CFD\INTC,2,1.0,0.01,1.0,10000.0,1.0,0,-2.66,-2.1,可交易,
+QCOM,other,其他,Qualcomm  Spot CFD,Equities I CFD\QCOM,2,1.0,0.01,1.0,10000.0,1.0,0,-4.22,-3.34,可交易,
+AVGO,other,其他,Broadcom  Spot CFD,Equities I CFD\AVGO,2,1.0,0.01,1.0,10000.0,1.0,0,-8.14,-6.43,可交易,
+CSCO,other,其他,Cisco Systems  Spot CFD,Equities I CFD\CSCO,2,1.0,0.01,1.0,10000.0,1.0,0,33.25,-43.94,可交易,
+JNJ,other,其他,Johnson and Johnson  Spot CFD,Equities I CFD\JNJ,2,1.0,0.01,1.0,10000.0,1.0,0,-6.13,-4.85,可交易,
+MCD,other,其他,McDonald's  Spot CFD,Equities I CFD\MCD,2,1.0,0.01,1.0,10000.0,1.0,0,-5.36,-4.24,可交易,
+SBUX,other,其他,Starbucks  Spot CFD,Equities I CFD\SBUX,2,1.0,0.01,1.0,10000.0,1.0,0,-2.19,-1.73,可交易,
+KO,other,其他,Coca-Cola  Spot CFD,Equities I CFD\KO,2,1.0,0.01,1.0,10000.0,1.0,0,-1.99,-1.57,可交易,
+MSTR,other,其他,MicroStrategy  Spot CFD,Equities I CFD\MSTR,2,1.0,0.01,1.0,10000.0,1.0,0,-3.54,-2.8,可交易,
+GME,other,其他,GameStop  Spot CFD,Equities I CFD\GME,2,1.0,0.01,1.0,10000.0,1.0,0,-0.54,-0.43,可交易,
+NKE,other,其他,Nike  Spot CFD,Equities I CFD\NKE,2,1.0,0.01,1.0,10000.0,1.0,0,-0.82,-0.65,可交易,
+CVX,other,其他,Chevron  Spot CFD,Equities I CFD\CVX,2,1.0,0.01,1.0,10000.0,1.0,0,-4.68,-3.7,可交易,
+FDX,other,其他,FedEx  Spot CFD,Equities I CFD\FDX,2,1.0,0.01,1.0,10000.0,1.0,0,-6.57,-5.2,可交易,
+JPM,other,其他,JPMorgan Chase  Spot CFD,Equities I CFD\JPM,2,1.0,0.01,1.0,10000.0,1.0,0,-7.67,-6.07,可交易,
+DIS,other,其他,Walt Disney  Spot CFD,Equities I CFD\DIS,2,1.0,0.01,1.0,10000.0,1.0,0,-2.42,-1.91,可交易,
+GM,other,其他,General Motors  Spot CFD,Equities I CFD\GM,2,1.0,0.01,1.0,10000.0,1.0,0,-1.84,-1.46,可交易,
+IBM,other,其他,IBM Corp  Spot CFD,Equities I CFD\IBM,2,1.0,0.01,1.0,10000.0,1.0,0,-5.04,-3.98,可交易,
+ARM,other,其他,Arm Holdings Inc  Spot CFD,Equities I CFD\ARM,2,1.0,0.01,1.0,10000.0,1.0,0,-6.66,-5.27,可交易,
+SNOW,other,其他,Snowflake Inc  Spot CFD,Equities I CFD\SNOW,2,1.0,0.01,1.0,10000.0,1.0,0,-7.56,-5.98,可交易,
+ASML,other,其他,ASML Holding  Spot CFD,Equities I CFD\ASML,2,1.0,0.01,1.0,10000.0,1.0,0,-41.97,-33.19,可交易,
+AZN,other,其他,AstraZeneca PLC  Spot CFD,Equities I CFD\AZN,2,1.0,0.01,1.0,10000.0,1.0,0,-3.76,-2.97,可交易,
+BRK.B,other,其他,Berkshire Hathaway Inc Class B  Spot CFD,Equities I CFD\BRK.B,2,1.0,0.01,1.0,10000.0,1.0,0,-11.51,-9.1,可交易,
+XOM,other,其他,Exxon Mobil  Spot CFD,Equities I CFD\XOM,2,1.0,0.01,1.0,10000.0,1.0,0,-3.7,-2.92,可交易,
+SPCX,other,其他,SpaceX  Spot CFD,Equities I CFD\SPCX,2,1.0,0.01,1.0,10000.0,1.0,0,-3.42,-2.7,可交易,
+AIRF,other,其他,Air France KLM  Spot CFD,Equities II CFD\AIRF,2,1.0,0.0112352,1.0,10000.0,1.0,0,-0.2,-0.15,可交易,
+ALVG,other,其他,Allianz  Spot CFD,Equities II CFD\ALVG,2,1.0,0.0112352,1.0,10000.0,1.0,0,-7.11,-5.36,可交易,
+BAYGn,other,其他,Bayer  Spot CFD,Equities II CFD\BAYGn,2,1.0,0.0112352,1.0,10000.0,1.0,0,-0.82,-0.62,可交易,
+DBKGn,other,其他,Deutsche Bank  Spot CFD,Equities II CFD\DBKGn,2,1.0,0.0112352,1.0,10000.0,1.0,0,-0.54,-0.41,可交易,
+IBE,other,其他,Iberdrola  Spot CFD,Equities II CFD\IBE,2,1.0,0.0112352,1.0,10000.0,1.0,0,-0.35,-0.26,可交易,
+LVMH,other,其他,LVMH  Spot CFD,Equities II CFD\LVMH,2,1.0,0.0112352,1.0,10000.0,1.0,0,-6.67,-5.02,可交易,
+VOWG_p,other,其他,Volkswagen  Spot CFD,Equities II CFD\VOWG_p,2,1.0,0.0112352,1.0,10000.0,1.0,0,-1.21,-0.91,可交易,
+TTE,other,其他,TotalEnergies  Spot CFD,Equities II CFD\TTE,2,1.0,0.0112352,1.0,10000.0,1.0,0,-1.29,-0.97,可交易,
+SAN,other,其他,Banco Santander  Spot CFD,Equities II CFD\SAN,4,1.0,0.00011235200000000001,1.0,10000.0,1.0,0,-21.03,-15.85,可交易,
+ADSGn,other,其他,Adidas AG  Spot CFD,Equities II CFD\ADSGn,2,1.0,0.0112352,1.0,10000.0,1.0,0,-2.48,-1.87,可交易,
+BMW,other,其他,BMW AG  Spot CFD,Equities II CFD\BMW,2,1.0,0.0112352,1.0,10000.0,1.0,0,-0.95,-0.71,可交易,
+MBG,other,其他,Mercedes-Benz Group AG  Spot CFD,Equities II CFD\MBG,2,1.0,0.0112352,1.0,10000.0,1.0,0,-0.69,-0.52,可交易,
+SIEGn,other,其他,Siemens AG  Spot CFD,Equities II CFD\SIEGn,2,1.0,0.0112352,1.0,10000.0,1.0,0,-4.7,-3.55,可交易,
+COCOA.c,agri,農產品,Cocoa vs US Dollar  Spot CFD,Agriculture\COCOA.c,1,1.0,0.1,1.0,1000.0,1.0,0,-17.99,2.84,可交易,Y
+COFFEE.c,agri,農產品,Coffee vs US Dollar  Spot CFD,Agriculture\COFFEE.c,2,1.0,0.01,1.0,1000.0,1.0,0,4.57,-22.98,可交易,Y
+CORN.c,agri,農產品,Corn vs US Dollar  Spot CFD,Agriculture\CORN.c,2,1.0,0.01,1.0,1000.0,1.0,0,-37.57,7.47,可交易,Y
+SOYBEAN.c,agri,農產品,Soybean vs US Dollar  Spot CFD ,Agriculture\SOYBEAN.c,2,1.0,0.01,1.0,1000.0,1.0,0,-26.52,2.94,可交易,Y
+WHEAT.c,agri,農產品,Wheat  Spot CFD,Agriculture\WHEAT.c,2,1.0,0.01,1.0,1000.0,1.0,0,-22.95,3.65,可交易,Y
+COTTON.c,agri,農產品,Cotton vs US Dollar  Spot CFD,Agriculture\COTTON.c,2,1.0,0.01,1.0,1000.0,1.0,0,-4.07,0.75,可交易,Y
+SUGAR.c,agri,農產品,Sugar vs US Dollar  Spot CFD,Agriculture\SUGAR.c,2,1.0,0.01,1.0,1000.0,1.0,0,-0.86,0.16,可交易,Y
+NATGAS.cash,energy,能源,Natural Gas Instrument  Spot CFD,Commodities\NATGAS.cash,3,1000.0,1.0,0.01,50.0,0.01,0,-5.83,1.27,可交易,Y
+HEATOIL.c,energy,能源,Heating Oil  Spot CFD,Commodities\HEATOIL.c,3,100.0,0.1,0.01,1000.0,0.01,0,2.18,-9.95,可交易,Y
+DXY.cash,index,指數,Dollar Index  Spot CFD,Cash III CFD\DXY.cash,3,100.0,0.1,0.01,1000.0,0.01,0,-23.13,1.17,可交易,Y
+ADAUSD,crypto,加密貨幣,Cardano vs US Dollar  Spot CFD,Crypto I CFD\ADAUSD,4,100000.0,10.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+BTCUSD,crypto,加密貨幣,Bitcoin vs US Dollar  Spot CFD,Crypto I CFD\BTCUSD,2,1.0,0.01,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+DASHUSD,crypto,加密貨幣,Dash vs US Dollar  Spot CFD,Crypto I CFD\DASHUSD,2,1000.0,10.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+DOTUSD,crypto,加密貨幣,Polkadot vs US Dollar  Spot CFD,Crypto I CFD\DOTUSD,4,10000.0,1.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+ETHUSD,crypto,加密貨幣,Ethereum vs US Dollar  Spot CFD,Crypto I CFD\ETHUSD,2,10.0,0.1,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+LTCUSD,crypto,加密貨幣,Litecoin vs US Dollar  Spot CFD,Crypto I CFD\LTCUSD,2,100.0,1.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+XRPUSD,crypto,加密貨幣,Ripple vs US Dollar  Spot CFD,Crypto I CFD\XRPUSD,5,10000.0,0.1,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+BCHUSD,crypto,加密貨幣,BitCoin Cash vs US Dollar  Spot CFD,Crypto I CFD\BCHUSD,2,100.0,1.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+SOLUSD,crypto,加密貨幣,Solana vs US Dollar  Spot CFD,Crypto I CFD\SOLUSD,2,100.0,1.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+AVAUSD,crypto,加密貨幣,Avalanche vs US Dollar  Spot CFD,Crypto I CFD\AVAUSD,2,1000.0,10.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+ETCUSD,crypto,加密貨幣,Ethereum Classic vs US Dollar  Spot CFD,Crypto I CFD\ETCUSD,3,1000.0,1.0,0.01,5.0,0.01,0,-30.0,-30.0,可交易,Y
+DOGEUSD,crypto,加密貨幣,Dogecoin vs US Dollar  Spot CFD,Crypto II CFD\DOGEUSD,5,100000.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+NEOUSD,crypto,加密貨幣,Neo vs US Dollar  Spot CFD,Crypto II CFD\NEOUSD,3,1000.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+XMRUSD,crypto,加密貨幣,Monero vs US Dollar  Spot CFD,Crypto II CFD\XMRUSD,2,100.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+BNBUSD,crypto,加密貨幣,Binance Coin vs US Dollar  Spot CFD,Crypto II CFD\BNBUSD,2,100.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+SANUSD,crypto,加密貨幣,The Sandbox vs US Dollar  Spot CFD,Crypto II CFD\SANUSD,4,100000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+LNKUSD,crypto,加密貨幣,Chainlink vs US Dollar  Spot CFD,Crypto II CFD\LNKUSD,3,1000.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+NERUSD,crypto,加密貨幣,NEAR protocol vs US Dollar  Spot CFD,Crypto II CFD\NERUSD,3,10000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+ALGUSD,crypto,加密貨幣,Algorand vs US Dollar  Spot CFD,Crypto II CFD\ALGUSD,4,100000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+ICPUSD,crypto,加密貨幣,Internet Computer vs US Dollar  Spot CFD,Crypto II CFD\ICPUSD,3,10000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+AAVUSD,crypto,加密貨幣,AAVE vs US Dollar  Spot CFD,Crypto II CFD\AAVUSD,2,100.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+BARUSD,crypto,加密貨幣,Hedera vs US Dollar  Spot CFD,Crypto II CFD\BARUSD,5,100000.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+GALUSD,crypto,加密貨幣,GALA vs US Dollar  Spot CFD,Crypto II CFD\GALUSD,5,1000000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+GRTUSD,crypto,加密貨幣,The Graph vs US Dollar  Spot CFD,Crypto II CFD\GRTUSD,5,1000000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+IMXUSD,crypto,加密貨幣,Immutable X vs US Dollar  Spot CFD,Crypto II CFD\IMXUSD,4,100000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+MANUSD,crypto,加密貨幣,Decentraland vs US Dollar  Spot CFD,Crypto II CFD\MANUSD,5,100000.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+VECUSD,crypto,加密貨幣,VeChain vs US Dollar  Spot CFD,Crypto II CFD\VECUSD,5,1000000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+XLMUSD,crypto,加密貨幣,Stellar Lumens vs US Dollar  Spot CFD,Crypto II CFD\XLMUSD,4,100000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+UNIUSD,crypto,加密貨幣,Uniswap vs US Dollar  Spot CFD,Crypto II CFD\UNIUSD,4,10000.0,1.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
+XTZUSD,crypto,加密貨幣,Tezos vs US Dollar  Spot CFD,Crypto II CFD\XTZUSD,4,100000.0,10.0,0.01,1.0,0.01,0,-30.0,-30.0,可交易,Y
