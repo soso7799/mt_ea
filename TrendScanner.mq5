@@ -22,7 +22,7 @@
 //|                                                                  |
 //|  安裝：與 MarketRegime.mqh、SymbolGroups.mqh 放同一資料夾，F7 編譯    |
 //+------------------------------------------------------------------+
-#property version   "2.00"
+#property version   "2.10"
 #property description "多指標趨勢掃描、進出場計畫、移動止損與加碼（預設不下單）"
 
 #include "MarketRegime.mqh"
@@ -40,6 +40,7 @@ input bool   InpAllowReal     = false;  // 允許在真實帳戶下單
 input long   InpLockAccount   = 0;      // 只在此帳號下單（0 = 不限）
 input long   InpMagic         = 26100100;
 input group "=== 掃描範圍 ==="
+input string InpSymbols       = "USDJPY,CADJPY,GBPJPY,CHFJPY,USOIL.cash,UKOIL.cash,JP225.cash"; // 只掃這些商品（空白 = 依下面來源/分組）；預設為 3年+10年回測都賺的 7 檔
 input ENUM_SCAN_SOURCE InpSource = SRC_MARKETWATCH;
 input string InpGroups        = "major,cross,metal,index,energy"; // 分組：major,cross,exotic,metal,energy,index,agri,crypto
 input int    InpScanMinutes   = 60;     // 掃描間隔（分鐘），另外每根新 H1 K棒也掃
@@ -255,6 +256,21 @@ void LoadSymbols()
 {
    ArrayResize(g_syms, 0);
    bool mw = (InpSource == SRC_MARKETWATCH);
+   string wl = InpSymbols;
+   StringReplace(wl, " ", "");
+   if(wl != "")
+   {
+      string p[];
+      int m = StringSplit(wl, ',', p);
+      for(int i = 0; i < m; i++)
+      {
+         if(p[i] == "" || !SymbolSelect(p[i], true)) { if(p[i] != "") PrintFormat("TrendScanner：找不到商品 %s，略過", p[i]); continue; }
+         int n = ArraySize(g_syms);
+         ArrayResize(g_syms, n + 1);
+         g_syms[n] = p[i];
+      }
+   }
+   else
    for(int i = 0; i < SymbolsTotal(mw); i++)
    {
       string s = SymbolName(i, mw);
@@ -275,7 +291,7 @@ void LoadSymbols()
       MakeHandles(g_syms[i], InpConfirmTF, g_par[i], g_hc[i]);
       g_fib.Prepare(g_syms[i]);
    }
-   PrintFormat("TrendScanner：掃描 %d 個商品（%s，分組 %s）", n, mw ? "市場報價" : "全部商品", InpGroups);
+   PrintFormat("TrendScanner：掃描 %d 個商品（%s）", n, wl != "" ? "指定清單" : (mw ? "市場報價，分組 " + InpGroups : "全部商品，分組 " + InpGroups));
 }
 
 double SuggestLots(const string s, const double dist)

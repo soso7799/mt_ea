@@ -55,7 +55,8 @@ def symbol_group(sym):
     keys = [("metal", "XAU XAG XPT XPD GOLD SILVER PLATINUM PALLADIUM COPPER XCU"),
             ("index", "US30 US100 NAS100 USTEC US500 SPX SP500 US2000 RUSSELL GER40 DE40 DAX UK100 FTSE FRA40 CAC JP225 "
                       "JPN225 NIKKEI AUS200 HK50 HSI EU50 STOXX SPN35 IBEX N25 AEX CHN50 CN50 DXY USDX VIX SWI20 ITA40 NETH25"),
-            ("crypto", "BTC ETH LTC XRP BCH SOL DOGE ADA DOT XLM LINK AVAX BNB UNI XMR DASH NEO ETC ALGO MATIC"),
+            ("crypto", "BTC ETH LTC XRP BCH SOL DOGE ADA DOT XLM LINK AVAX BNB UNI XMR DASH NEO ETC ALGO MATIC "
+                       "AAV ALG AVA BAR GAL GRT ICP IMX LNK MAN NER SAN VEC XTZ"),
             ("energy", "OIL BRENT WTI NATGAS NGAS GASOIL HEATING"),
             ("agri", "CORN WHEAT SOY COFFEE COCOA SUGAR COTTON OJ ORANGE CATTLE HOGS RICE OAT")]
     for g, ks in keys:
@@ -397,6 +398,10 @@ HEAD = f"{'':<14} {'筆數':>5} {'勝率':>7} {'平均R':>7} {'總R':>8} {'PF':>
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")   # 導到檔案時用 UTF-8，避免亂碼
+    except AttributeError:
+        pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     appdata = os.environ.get("APPDATA", "")
     ap.add_argument("--data", default=os.path.join(appdata, "MetaQuotes", "Terminal", "Common", "Files", "FTMO_Data"))
