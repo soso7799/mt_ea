@@ -6,6 +6,8 @@
 //|    break  突破：    收盤突破壓力線 + 確認 → 做多（每條線只算第一次）    |
 //|    確認：none / RSI 60-40 回落 / K 棒（吞噬、長影線）/ EMA9×21 交叉    |
 //|  InpTradeEnabled=false 只顯示訊號；InpAllowReal=false 真實帳戶不下單  |
+//|  預設 = 10 年回測最好的組合（H4 線 → H1 突破、順勢、RR3，主要貨幣+金屬 |
+//|  PF 1.05，優勢很薄、統計不顯著）→ 建議只當畫線/提醒工具            |
 //+------------------------------------------------------------------+
 #property copyright "mt_ea"
 #property version   "1.00"
@@ -27,20 +29,20 @@ input bool   InpAllowReal    = false;   // 允許在真實帳戶下單
 input long   InpLockAccount  = 0;       // 只在此帳號下單（0 = 不限）
 input long   InpMagic        = 26100200;
 input group "=== 商品 ==="
-input string InpSymbols      = "USDJPY,CADJPY,GBPJPY,CHFJPY,EURJPY,AUDJPY,NZDJPY,JP225.cash,UKOIL.cash"; // 掃描商品（空白 = 只用本圖表商品）
+input string InpSymbols      = "EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,XAUUSD,XAGUSD"; // 掃描商品（空白 = 只用本圖表商品）
 input group "=== 畫線（大週期）==="
-input ENUM_TIMEFRAMES InpHTF = PERIOD_H1;
+input ENUM_TIMEFRAMES InpHTF = PERIOD_H4;
 input int    InpPivot        = 5;       // 擺動高低點左右各幾根
 input int    InpLineBars     = 400;     // 回看 K 棒數（>= 300）
 input double InpZone         = 0.3;     // 碰線容許距離（大週期 ATR 倍數）
 input bool   InpDraw         = true;    // 在本圖表畫線
 input group "=== 進場（小週期）==="
-input ENUM_TIMEFRAMES InpLTF = PERIOD_M15;
-input ENUM_TLM_MODE    InpMode    = TLM_BOUNCE;
-input ENUM_TLM_TRIGGER InpTrigger = TRG_RSI;
-input bool   InpTrend        = false;   // 只順大週期 EMA50 方向
-input double InpRR           = 2.0;     // 止盈 = 幾倍止損距離
-input int    InpMaxHoldBars  = 96;      // 最多持有幾根小週期 K 棒（M15×96 = 1 天）
+input ENUM_TIMEFRAMES InpLTF = PERIOD_H1;
+input ENUM_TLM_MODE    InpMode    = TLM_BREAK; // 回測：碰線反轉在所有週期都虧
+input ENUM_TLM_TRIGGER InpTrigger = TRG_EMA;
+input bool   InpTrend        = true;    // 只順大週期 EMA50 方向
+input double InpRR           = 3.0;     // 止盈 = 幾倍止損距離
+input int    InpMaxHoldBars  = 48;      // 最多持有幾根小週期 K 棒（H1×48 = 2 天）
 input group "=== 風控 ==="
 input double InpRiskPct      = 0.15;    // 每筆風險（帳戶餘額 %）
 input double InpMaxLot       = 1.0;     // 單筆手數上限
