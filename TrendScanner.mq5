@@ -22,7 +22,7 @@
 //|                                                                  |
 //|  安裝：單一檔案（已內含 MarketRegime / SymbolGroups），F7 編譯          |
 //+------------------------------------------------------------------+
-#property version   "2.10"
+#property version   "2.20"
 #property description "多指標趨勢掃描、進出場計畫、移動止損與加碼（預設不下單）"
 
 //=== 內嵌 MarketRegime.mqh（單一檔案即可編譯）===
@@ -562,7 +562,7 @@ input bool   InpAllowReal     = false;  // 允許在真實帳戶下單
 input long   InpLockAccount   = 0;      // 只在此帳號下單（0 = 不限）
 input long   InpMagic         = 26100100;
 input group "=== 掃描範圍 ==="
-input string InpSymbols       = "USDJPY,CADJPY,GBPJPY,CHFJPY,USOIL.cash,UKOIL.cash,JP225.cash"; // 只掃這些商品（空白 = 依下面來源/分組）；預設為 3年+10年回測都賺的 7 檔
+input string InpSymbols       = "USDJPY,CADJPY,GBPJPY,CHFJPY,EURJPY,AUDJPY,NZDJPY,JP225.cash,UKOIL.cash"; // 只掃這些商品（空白 = 依來源/分組）；預設 = 日圓交叉7檔+JP225+UKOIL（10年回測 11年中10年賺）
 input ENUM_SCAN_SOURCE InpSource = SRC_MARKETWATCH;
 input string InpGroups        = "major,cross,metal,index,energy"; // 分組：major,cross,exotic,metal,energy,index,agri,crypto
 input int    InpScanMinutes   = 60;     // 掃描間隔（分鐘），另外每根新 H1 K棒也掃
