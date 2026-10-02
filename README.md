@@ -93,7 +93,7 @@ python ml/train_logit.py       # 離線訓練 ML 模型（選用）
 ## HistoryExporter.mq5 — 從 FTMO 匯出歷史資料（只讀，每 10 天自動更新）
 
 1. MT5「工具 → 選項 → 圖表 → 圖表最大K棒數」設為 **Unlimited**，重啟 MT5。
-2. `HistoryExporter.mq5` 與 `SymbolGroups.mqh` 放同一資料夾，F7 編譯，掛到 **FTMO 模擬帳戶** 任一圖表（只讀不交易）。
+2. `HistoryExporter.mq5`（單一檔案，已內含商品分組）放到 `MQL5\Experts\`，F7 編譯，掛到 **FTMO 模擬帳戶** 任一圖表（只讀不交易）。
 3. 週期：M3 M5 M10 M12 M15 M30 H1 H4 D1 W1 MN1（不含 M1 以節省空間，`InpTFs` 加上 M1 即可）；分鐘週期抓 3 年、H1~MN1 抓 10 年（參數可改）。
 4. 輸出 `Common\Files\FTMO_Data\<週期>\<商品>.csv`（FTMO 伺服器時間，MT5 匯入格式），總表 `SUMMARY.md / SUMMARY.csv`。
 5. 第一次掛上立刻執行（下載歷史約 1~3 小時）；之後每 10 天於**台灣時間 01:00** 只附加新K棒（約 5~10 分鐘）。電腦當時沒開機，開機後會補跑。
