@@ -337,7 +337,7 @@ private:
    void LockDay()
    {
       GlobalVariableSet("PRO_DAY_LOCK", (double)TimeLocal());
-      Print("⛔ 全局鎖日");
+      Print("⛔ 已鎖定全日交易");
    }
 
    bool IsSymbolLocked(string sym)
@@ -524,7 +524,7 @@ public:
          {
             // 該商品券商不支援/沒報價，釋放已建立的handle，整個標記跳過，
             // 不影響其餘商品——只有真正在用的貨幣對才需要InitIndicators 100%成功。
-            PrintFormat("⚠️ FilterLib v5: %s 指標handle建立失敗(err=%d)，跳過此商品", sym, GetLastError());
+            PrintFormat("⚠️ 風控模組 v5：%s 指標句柄建立失敗（錯誤碼=%d），略過此商品", sym, GetLastError());
 
             if(m_hEmaFast[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaFast[i]); m_hEmaFast[i] = INVALID_HANDLE; }
             if(m_hEmaSlow[i] != INVALID_HANDLE) { IndicatorRelease(m_hEmaSlow[i]); m_hEmaSlow[i] = INVALID_HANDLE; }
@@ -539,9 +539,9 @@ public:
       }
 
       if(failCount > 0)
-         PrintFormat("FilterLib v5: 指標handle建立完成，%d/%d 個商品被跳過", failCount, SYMBOL_COUNT);
+         PrintFormat("風控模組 v5：指標句柄初始化完成，略過 %d/%d 個商品", failCount, SYMBOL_COUNT);
       else
-         Print("FilterLib v5: 全部指標handle建立完成");
+         Print("風控模組 v5：所有指標句柄初始化完成");
 
       return true;
    }
@@ -558,7 +558,7 @@ public:
          if(m_hStoch[i]   != INVALID_HANDLE) { IndicatorRelease(m_hStoch[i]);   m_hStoch[i]   = INVALID_HANDLE; }
       }
 
-      Print("FilterLib v5: 所有指標handle已釋放");
+      Print("風控模組 v5：所有指標句柄已釋放");
    }
 
    //-----------------------------------------------------------------
@@ -589,7 +589,7 @@ public:
       bool normal    = (atrPips < limit);
 
       if(!normal)
-         Print("🚫 ", sym, " ATR=", DoubleToString(atrPips,1), " > ", DoubleToString(limit,1), " pips");
+         Print("🚫 ", sym, " ATR=", DoubleToString(atrPips,1), " > ", DoubleToString(limit,1), " 點");
 
       return normal;
    }
@@ -615,7 +615,7 @@ public:
                if(GlobalVariableCheck(key))
                   GlobalVariableDel(key);
             }
-            Print("✅ 啟動時重置完成");
+            Print("✅ 啟動時重設完成");
          }
 
          lastResetDay = TimeLocal();
@@ -642,7 +642,7 @@ public:
 
          lastResetDay     = TimeLocal();
          forceClosedToday = false;
-         Print("✅ 每日重置完成");
+         Print("✅ 每日重設完成");
       }
    }
 
@@ -807,7 +807,7 @@ public:
          if(MathAbs(newSL - curSL) > point * 2)
          {
             trade.PositionModify(ticket, NormalizeDouble(newSL, digits), curTP);
-            Print("📐 SL ", sym, " ", DoubleToString(curSL,5), " -> ", DoubleToString(newSL,5), " [追蹤]");
+            Print("📐 ", sym, " 移動止損：", DoubleToString(curSL,5), " → ", DoubleToString(newSL,5));
          }
 
          if(sidx >= 0 && _checkNewBarF(sidx))
@@ -815,7 +815,7 @@ public:
             ENUM_SIG sig = _calcSignalShift(sidx, 1);
             if((dir == 1 && sig == SIG_SELL) || (dir == -1 && sig == SIG_BUY))
             {
-               Print("🔄 [F] 反向信號 ", sym, " ticket=", ticket, " → 主動平倉");
+               Print("🔄 [F] ", sym, " 出現反向訊號，持倉編號=", ticket, " → 主動平倉");
                trade.PositionClose(ticket);
             }
          }
@@ -896,8 +896,8 @@ public:
          double nSL = CalcTrailingStop(sym, dir, pos.PriceOpen(), pos.StopLoss());
          int dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
 
-         slInfo += StringFormat("  #%d %s  入場=%.*f  SL=%.*f->%.*f  TP=%.*f\n",
-                                pos.Ticket(), (dir==1 ? "BUY" : "SELL"),
+         slInfo += StringFormat("  #%d %s  進場價=%.*f  止損=%.*f→%.*f  止盈=%.*f\n",
+                                pos.Ticket(), (dir==1 ? "買進" : "賣出"),
                                 dg, pos.PriceOpen(),
                                 dg, pos.StopLoss(), dg, nSL,
                                 dg, pos.TakeProfit());
@@ -910,20 +910,20 @@ public:
       r += StringFormat("⏰ %02d:%02d:%02d  淨值:$%.2f(警戒$%.0f)\n",
                         t.hour, t.min, t.sec,
                         AccountInfoDouble(ACCOUNT_EQUITY), AccountEquityFloor);
-      r += StringFormat("📊 總PnL:$%.2f(限$%.0f)\n", GetTotalDayPnL(), DayLossLimit);
-      r += StringFormat("📈 ATR:%.1f pips  上限:%.1f pips  %s\n",
+      r += StringFormat("📊 當日總損益：$%.2f（限額$%.0f）\n", GetTotalDayPnL(), DayLossLimit);
+      r += StringFormat("📈 ATR：%.1f 點  上限：%.1f 點  %s\n",
                         atrPips, atrLimit, (atrPips < atrLimit) ? "✅正常" : "🚫異常");
-      r += StringFormat("🔒 全局:%s  貨幣:%s\n",
+      r += StringFormat("🔒 全域鎖定:%s  商品鎖定:%s\n",
                         IsDayLocked() ? "鎖" : "開",
                         IsSymbolLocked(sym) ? "鎖" : "開");
-      r += StringFormat("🚫 禁單時段1:%s  時段2:%s(MT5結算)  現在:%s\n",
+      r += StringFormat("🚫 禁止交易時段1：%s  時段2：%s（MT5結算）  目前：%s\n",
                         w1, w2, IsInNoTradeWindow() ? "⛔禁單中" : "✅正常");
-      r += StringFormat("⛔ %s 今日止損:%d/%d次\n", sym, slCount, MaxSymbolStopLoss);
-      r += StringFormat("📐 追蹤SL: 有效K棒>=%dpips 最多%d根 | 階梯:+%d->鎖%dpips\n",
+      r += StringFormat("⛔ %s 今日止損次數：%d/%d\n", sym, slCount, MaxSymbolStopLoss);
+      r += StringFormat("📐 移動止損：有效K棒實體≥%d點，最多%d根 | 階梯：獲利+%d點→鎖定%d點\n",
                         MinBarBodyPips, MaxSwingBars, StepProfitPips, StepLockPips);
 
       if(idx >= 0)
-         r += StringFormat("📋 %s  SL=%.2f  TP=%.2f  lot=%.2f\n",
+         r += StringFormat("📋 %s  止損=%.2f  止盈=%.2f  手數=%.2f\n",
                            sym, fx_rules[idx].sl_pips, fx_rules[idx].tp_pips, fx_rules[idx].lot_size);
 
       if(slInfo != "")

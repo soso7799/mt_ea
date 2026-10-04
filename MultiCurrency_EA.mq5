@@ -530,7 +530,7 @@ void TryOpenPositions()
    if(ok)
       MarkBarUsed(bestIndex);
    else
-      Print("❌ 下單失敗: ", sym, " err=", GetLastError());
+      Print("❌ 下單失敗：", sym, " 錯誤碼=", GetLastError());
 }
 
 //------------------------------------------------------------------
