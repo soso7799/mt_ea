@@ -7,12 +7,12 @@
 #property version "5.20"
 #include <FilterLib_v5.mqh>
 
-input group "=== Basic ==="
+input group "=== 基本設定 ==="
 input long Inp_Magic      = 20250101;
 input int  Inp_MaxPos     = 3;
 input int  Inp_MinConfirm = 3; // 普通信號最少幾個指標同向(1~3)
 
-input group "=== Symbols ==="
+input group "=== 交易商品 ==="
 input string Inp_Sym1 = "USDJPY";
 input string Inp_Sym2 = "AUDUSD";
 input string Inp_Sym3 = "USDCAD";
@@ -21,49 +21,49 @@ input string Inp_Sym5 = "EURUSD";
 input string Inp_Sym6 = "USDCHF";
 input string Inp_Sym7 = "NZDUSD";
 
-input group "=== Sym1 (USDJPY) ==="
+input group "=== 商品1 (USDJPY) ==="
 input int    S1_EMA_F=10;  input int    S1_EMA_S=30;
 input int    S1_RSI_P=14; input int    S1_RSI_OS=42; input int S1_RSI_OB=58;
 input int    S1_BB_P=14;  input double S1_BB_Std=2.25;
 input int    S1_MF=10;    input int    S1_MS=24;      input int S1_MSig=7;
 input int    S1_KP=9;     input int    S1_KK=3;       input int S1_KD=3;
 
-input group "=== Sym2 (AUDUSD) ==="
+input group "=== 商品2 (AUDUSD) ==="
 input int    S2_EMA_F=9;  input int    S2_EMA_S=26;
 input int    S2_RSI_P=14; input int    S2_RSI_OS=38; input int S2_RSI_OB=62;
 input int    S2_BB_P=22;  input double S2_BB_Std=1.5;
 input int    S2_MF=12;    input int    S2_MS=26;      input int S2_MSig=9;
 input int    S2_KP=14;    input int    S2_KK=3;       input int S2_KD=3;
 
-input group "=== Sym3 (USDCAD) ==="
+input group "=== 商品3 (USDCAD) ==="
 input int    S3_EMA_F=12;  input int    S3_EMA_S=30;
 input int    S3_RSI_P=14; input int    S3_RSI_OS=40; input int S3_RSI_OB=60;
 input int    S3_BB_P=14;  input double S3_BB_Std=2.25;
 input int    S3_MF=11;    input int    S3_MS=25;      input int S3_MSig=8;
 input int    S3_KP=9;     input int    S3_KK=3;       input int S3_KD=3;
 
-input group "=== Sym4 (GBPUSD) ==="
+input group "=== 商品4 (GBPUSD) ==="
 input int    S4_EMA_F=8;  input int    S4_EMA_S=21;
 input int    S4_RSI_P=14; input int    S4_RSI_OS=35; input int S4_RSI_OB=65;
 input int    S4_BB_P=24;  input double S4_BB_Std=1.5;
 input int    S4_MF=8;    input int    S4_MS=21;      input int S4_MSig=5;
 input int    S4_KP=14;    input int    S4_KK=3;       input int S4_KD=3;
 
-input group "=== Sym5 (EURUSD) ==="
+input group "=== 商品5 (EURUSD) ==="
 input int    S5_EMA_F=9;  input int    S5_EMA_S=26;
 input int    S5_RSI_P=14; input int    S5_RSI_OS=40; input int S5_RSI_OB=60;
 input int    S5_BB_P=14;  input double S5_BB_Std=1.75;
 input int    S5_MF=12;    input int    S5_MS=26;      input int S5_MSig=9;
 input int    S5_KP=9;     input int    S5_KK=3;       input int S5_KD=3;
 
-input group "=== Sym6 (USDCHF) ==="
+input group "=== 商品6 (USDCHF) ==="
 input int    S6_EMA_F=10;  input int    S6_EMA_S=30;
 input int    S6_RSI_P=14; input int    S6_RSI_OS=42; input int S6_RSI_OB=58;
 input int    S6_BB_P=18;  input double S6_BB_Std=2.5;
 input int    S6_MF=12;    input int    S6_MS=28;      input int S6_MSig=9;
 input int    S6_KP=9;     input int    S6_KK=3;       input int S6_KD=3;
 
-input group "=== Sym7 (NZDUSD) ==="
+input group "=== 商品7 (NZDUSD) ==="
 input int    S7_EMA_F=9;  input int    S7_EMA_S=26;
 input int    S7_RSI_P=14; input int    S7_RSI_OS=38; input int S7_RSI_OB=62;
 input int    S7_BB_P=18;  input double S7_BB_Std=2.0;
@@ -194,10 +194,10 @@ int OnInit()
       if(H[i].ef==INVALID_HANDLE||H[i].es==INVALID_HANDLE||
          H[i].rsi==INVALID_HANDLE||H[i].bb==INVALID_HANDLE||
          H[i].macd==INVALID_HANDLE||H[i].stoch==INVALID_HANDLE)
-      { Print("Init failed: ",s); return INIT_FAILED; }
+      { Print("初始化失敗：",s); return INIT_FAILED; }
       lastBarTime[i]=0;
    }
-   Print("EA v5.2 started");
+   Print("EA v5.2 已啟動");
    return INIT_SUCCEEDED;
 }
 
@@ -523,9 +523,9 @@ void TryOpenPositions()
 
    bool ok=false;
    if(sig>0)
-      ok = trade.Buy(lot, sym, 0, sl, tp, "MC BUY");
+      ok = trade.Buy(lot, sym, 0, sl, tp, "多幣別買進");
    else
-      ok = trade.Sell(lot, sym, 0, sl, tp, "MC SELL");
+      ok = trade.Sell(lot, sym, 0, sl, tp, "多幣別賣出");
 
    if(ok)
       MarkBarUsed(bestIndex);
@@ -543,8 +543,8 @@ void OnTick()
    for(int i=0;i<SYM_COUNT;i++)
       if(HasPos(symbols[i])) posInfo+=symbols[i]+" ";
    Comment(
-      "MultiCurrency EA v5.2\n",
-      "MinConfirm=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由FilterLib控制\n",
+      "多幣別 EA v5.2\n",
+      "最低確認分數=",IntegerToString(Inp_MinConfirm)," | 5/5訂單上限由風控模組控制\n",
       Inp_Sym1+"/"+Inp_Sym2+"/"+Inp_Sym3+"/"+
       Inp_Sym4+"/"+Inp_Sym5+"/"+Inp_Sym6+"/"+Inp_Sym7+"\n",
      "持倉("+IntegerToString(CountPos())+"/"+IntegerToString(Inp_MaxPos)+"): "+posInfo+"\n\n",
